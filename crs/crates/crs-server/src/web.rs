@@ -5,6 +5,9 @@
 //! This module provides the HTML web dashboard endpoint for viewing
 //! registered clients in a web browser.
 
+// Suppress warnings for Dropshot's macro-generated phantom types
+#![allow(dead_code)]
+
 use crate::api::ApiContext;
 use crs_common::ClientStatus;
 use dropshot::{endpoint, Body, HttpError, RequestContext};

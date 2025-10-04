@@ -5,6 +5,9 @@
 //! This module contains the Dropshot endpoint handlers for the CRS REST API.
 //! All endpoints use JSON for request and response bodies.
 
+// Suppress warnings for Dropshot's macro-generated phantom types
+#![allow(dead_code)]
+
 use crate::registry::Registry;
 use chrono::Utc;
 use crs_common::{
