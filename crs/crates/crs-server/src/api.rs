@@ -24,6 +24,8 @@ use dropshot::{
 pub struct ApiContext {
     /// The client registry
     pub registry: Registry,
+    /// Server start time
+    pub start_time: chrono::DateTime<chrono::Utc>,
 }
 
 /// Register a new client
@@ -92,8 +94,12 @@ pub async fn heartbeat(
 pub async fn list_clients(
     ctx: RequestContext<ApiContext>,
 ) -> Result<HttpResponseOk<ListClientsResponse>, HttpError> {
-    let registry = &ctx.context().registry;
+    let api_context = ctx.context();
+    let registry = &api_context.registry;
     let clients = registry.list_clients();
 
-    Ok(HttpResponseOk(ListClientsResponse { clients }))
+    Ok(HttpResponseOk(ListClientsResponse {
+        clients,
+        server_start_time: api_context.start_time,
+    }))
 }

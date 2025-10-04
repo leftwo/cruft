@@ -75,6 +75,10 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Record server start time
+    let start_time = chrono::Utc::now();
+
     // Create the registry
     let registry = Registry::new();
 
@@ -109,7 +113,10 @@ async fn main() -> Result<()> {
     };
 
     // Create API context
-    let context = ApiContext { registry };
+    let context = ApiContext {
+        registry,
+        start_time,
+    };
 
     // Build API description
     let mut api = dropshot::ApiDescription::new();

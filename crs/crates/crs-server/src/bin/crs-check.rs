@@ -126,15 +126,34 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
-fn display_status(response: ListClientsResponse, server_url: &str) {
+fn display_status(response: ListClientsResponse, _server_url: &str) {
     println!("{}", "=".repeat(80));
     println!("CRS Server Status");
     println!("{}", "=".repeat(80));
     println!();
 
-    // Server information
-    println!("Server Information:");
-    println!("Server URL  : {}", server_url);
+    // Server uptime
+    let now = Utc::now();
+    let uptime_duration = now - response.server_start_time;
+    let uptime_str = if uptime_duration.num_days() > 0 {
+        format!(
+            "{}d {}h",
+            uptime_duration.num_days(),
+            uptime_duration.num_hours() % 24
+        )
+    } else if uptime_duration.num_hours() > 0 {
+        format!(
+            "{}h {}m",
+            uptime_duration.num_hours(),
+            uptime_duration.num_minutes() % 60
+        )
+    } else if uptime_duration.num_minutes() > 0 {
+        format!("{}m", uptime_duration.num_minutes())
+    } else {
+        format!("{}s", uptime_duration.num_seconds())
+    };
+
+    println!("Server Uptime: {}", uptime_str);
     println!();
 
     // Client table header

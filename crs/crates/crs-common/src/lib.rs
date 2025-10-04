@@ -183,6 +183,9 @@ pub struct RegisteredClient {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ListClientsResponse {
     pub clients: Vec<RegisteredClient>,
+    /// Server start time (RFC3339 format)
+    #[schemars(with = "String")]
+    pub server_start_time: DateTime<Utc>,
 }
 
 /// Error types for the CRS protocol

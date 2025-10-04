@@ -28,7 +28,8 @@ use http::{Response, StatusCode};
 pub async fn dashboard(
     ctx: RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
-    let registry = &ctx.context().registry;
+    let api_context = ctx.context();
+    let registry = &api_context.registry;
     let clients = registry.list_clients();
 
     // Get server information
@@ -39,6 +40,27 @@ pub async fn dashboard(
     let server_os = std::env::consts::OS;
     let server_version = env!("CARGO_PKG_VERSION");
     let server_bind_addr = ctx.server.local_addr;
+
+    // Calculate server uptime
+    let now = chrono::Utc::now();
+    let uptime_duration = now - api_context.start_time;
+    let uptime_str = if uptime_duration.num_days() > 0 {
+        format!(
+            "{}d {}h",
+            uptime_duration.num_days(),
+            uptime_duration.num_hours() % 24
+        )
+    } else if uptime_duration.num_hours() > 0 {
+        format!(
+            "{}h {}m",
+            uptime_duration.num_hours(),
+            uptime_duration.num_minutes() % 60
+        )
+    } else if uptime_duration.num_minutes() > 0 {
+        format!("{}m", uptime_duration.num_minutes())
+    } else {
+        format!("{}s", uptime_duration.num_seconds())
+    };
 
     let mut rows = String::new();
     for client in &clients {
@@ -158,8 +180,10 @@ pub async fn dashboard(
             <th>IP Address</th>
             <th>OS</th>
             <th>Version</th>
+            <th>Uptime</th>
         </tr>
         <tr class="server-info">
+            <td>{}</td>
             <td>{}</td>
             <td>{}</td>
             <td>{}</td>
@@ -186,6 +210,7 @@ pub async fn dashboard(
         server_bind_addr,
         server_os,
         server_version,
+        uptime_str,
         clients.len(),
         rows
     );
