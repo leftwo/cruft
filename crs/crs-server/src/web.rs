@@ -30,7 +30,10 @@ pub async fn dashboard(
 ) -> Result<Response<Body>, HttpError> {
     let api_context = ctx.context();
     let registry = &api_context.registry;
-    let clients = registry.list_clients();
+    let mut clients = registry.list_clients();
+
+    // Sort clients by IP address
+    clients.sort_by(|a, b| a.info.ip_address.cmp(&b.info.ip_address));
 
     // Get server information
     let server_hostname = hostname::get()

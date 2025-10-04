@@ -126,7 +126,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
-fn display_status(response: ListClientsResponse) {
+fn display_status(mut response: ListClientsResponse) {
     println!("{}", "=".repeat(80));
     println!("CRS Server Status");
     println!("{}", "=".repeat(80));
@@ -155,6 +155,11 @@ fn display_status(response: ListClientsResponse) {
 
     println!("Server Uptime: {}", uptime_str);
     println!();
+
+    // Sort clients by IP address
+    response
+        .clients
+        .sort_by(|a, b| a.info.ip_address.cmp(&b.info.ip_address));
 
     // Client table header
     println!("Registered Clients ({}):", response.clients.len());
