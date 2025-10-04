@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/crs-server",
-    "crates/crs-client",
-    "crates/crs-common",
+    "crs-server",
+    "crs-client",
+    "crs-common",
 ]
 resolver = "2"
 
