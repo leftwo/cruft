@@ -95,9 +95,18 @@ async fn fetch_clients(server_url: &str) -> Result<ListClientsResponse> {
     Ok(clients_response)
 }
 
-fn format_duration(registered_at: chrono::DateTime<chrono::Utc>) -> String {
-    let now = Utc::now();
-    let duration = now - registered_at;
+fn format_duration(
+    registered_at: chrono::DateTime<chrono::Utc>,
+    last_heartbeat: chrono::DateTime<chrono::Utc>,
+    status: ClientStatus,
+) -> String {
+    // For offline clients, use last_heartbeat instead of now
+    let end_time = if status == ClientStatus::Offline {
+        last_heartbeat
+    } else {
+        Utc::now()
+    };
+    let duration = end_time - registered_at;
 
     if duration.num_days() > 0 {
         format!("{}d {}h", duration.num_days(), duration.num_hours() % 24)
@@ -177,7 +186,11 @@ fn display_status(mut response: ListClientsResponse) {
         let os = truncate_str(&client.info.os, 7);
         let version = truncate_str(&client.info.version, 8);
         let status = format_status(client.status);
-        let time_connected = format_duration(client.registered_at);
+        let time_connected = format_duration(
+            client.registered_at,
+            client.last_heartbeat,
+            client.status,
+        );
 
         println!(
             "{:<16} {:<15} {:<7} {:<8} {:<8} {:<14}",
@@ -243,21 +256,56 @@ mod tests {
 
         let now = Utc::now();
 
-        // Test seconds
-        let time = now - Duration::try_seconds(30).unwrap();
-        assert_eq!(format_duration(time), "30s");
+        // Test seconds (online client)
+        let registered = now - Duration::try_seconds(30).unwrap();
+        assert_eq!(
+            format_duration(registered, now, ClientStatus::Online),
+            "30s"
+        );
 
-        // Test minutes
-        let time = now - Duration::try_seconds(150).unwrap();
-        assert_eq!(format_duration(time), "2m");
+        // Test minutes (online client)
+        let registered = now - Duration::try_seconds(150).unwrap();
+        assert_eq!(
+            format_duration(registered, now, ClientStatus::Online),
+            "2m"
+        );
 
-        // Test hours
-        let time = now - Duration::try_seconds(3900).unwrap();
-        assert_eq!(format_duration(time), "1h 5m");
+        // Test hours (online client)
+        let registered = now - Duration::try_seconds(3900).unwrap();
+        assert_eq!(
+            format_duration(registered, now, ClientStatus::Online),
+            "1h 5m"
+        );
 
-        // Test days
-        let time = now - Duration::try_seconds(90000).unwrap();
-        assert_eq!(format_duration(time), "1d 1h");
+        // Test days (online client)
+        let registered = now - Duration::try_seconds(90000).unwrap();
+        assert_eq!(
+            format_duration(registered, now, ClientStatus::Online),
+            "1d 1h"
+        );
+    }
+
+    #[test]
+    fn test_format_duration_offline_client() {
+        use chrono::Duration;
+
+        let now = Utc::now();
+
+        // Client registered 10 minutes ago, last heartbeat 5 minutes ago
+        let registered = now - Duration::try_seconds(600).unwrap();
+        let last_heartbeat = now - Duration::try_seconds(300).unwrap();
+
+        // For offline client, should show time from registered to last_heartbeat (5 minutes)
+        assert_eq!(
+            format_duration(registered, last_heartbeat, ClientStatus::Offline),
+            "5m"
+        );
+
+        // For online client, should show time from registered to now (10 minutes)
+        assert_eq!(
+            format_duration(registered, last_heartbeat, ClientStatus::Online),
+            "10m"
+        );
     }
 
     #[test]
