@@ -55,8 +55,8 @@ pub struct CrsClient {
 impl CrsClient {
     /// Create a new CRS client
     ///
-    /// Automatically detects hostname, OS, and IP address. Registers
-    /// with the server immediately.
+    /// Detects hostname, OS, and IP address. Does not register immediately,
+    /// registration happens on first heartbeat attempt.
     ///
     /// # Arguments
     ///
@@ -88,18 +88,13 @@ impl CrsClient {
             .build()
             .context("failed to create HTTP client")?;
 
-        let mut client = Self {
+        Ok(Self {
             server_url,
             client_info,
             client_id: None,
             heartbeat_interval: Duration::from_secs(30),
             http_client,
-        };
-
-        // Register with the server
-        client.register().await?;
-
-        Ok(client)
+        })
     }
 
     /// Register with the CRS server
@@ -147,7 +142,8 @@ impl CrsClient {
     }
 
     /// Send a heartbeat to the CRS server
-    async fn heartbeat(&self) -> Result<()> {
+    /// Returns true if heartbeat succeeded, false if client needs to re-register
+    async fn heartbeat(&self) -> Result<bool> {
         let client_id = self.client_id.context("client not registered")?;
 
         let url = format!("{}/api/heartbeat", self.server_url);
@@ -162,6 +158,11 @@ impl CrsClient {
             .await
             .context("failed to send heartbeat")?;
 
+        // Check if the server doesn't know about this client (404)
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false); // Need to re-register
+        }
+
         if !response.status().is_success() {
             anyhow::bail!(
                 "heartbeat failed with status: {}",
@@ -169,23 +170,67 @@ impl CrsClient {
             );
         }
 
-        Ok(())
+        Ok(true) // Heartbeat succeeded
     }
 
     /// Run the client heartbeat loop
     ///
     /// This function runs indefinitely, sending heartbeats at the
-    /// configured interval. It will attempt to reconnect and
-    /// re-register if heartbeats fail.
-    pub async fn run(self) -> Result<()> {
+    /// configured interval. It will automatically register on startup,
+    /// re-register if the server forgets about the client, and retry
+    /// on connection failures.
+    pub async fn run(mut self) -> Result<()> {
+        // Initial registration with retry
+        loop {
+            match self.register().await {
+                Ok(()) => {
+                    println!("Successfully connected to server");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Failed to register with server: {}", e);
+                    eprintln!("Retrying in 5 seconds...");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
+        }
+
         let mut interval = tokio::time::interval(self.heartbeat_interval);
 
         loop {
             interval.tick().await;
 
-            if let Err(e) = self.heartbeat().await {
-                eprintln!("Heartbeat failed: {}", e);
-                eprintln!("Will retry on next interval...");
+            // Try to send heartbeat
+            match self.heartbeat().await {
+                Ok(true) => {
+                    // Heartbeat succeeded, all good
+                }
+                Ok(false) => {
+                    // Server doesn't know us, re-register
+                    eprintln!(
+                        "Server does not recognize client, re-registering..."
+                    );
+                    loop {
+                        match self.register().await {
+                            Ok(()) => {
+                                println!(
+                                    "Successfully re-registered with server"
+                                );
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to re-register: {}", e);
+                                eprintln!("Retrying in 5 seconds...");
+                                tokio::time::sleep(Duration::from_secs(5))
+                                    .await;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Heartbeat failed: {}", e);
+                    eprintln!("Will retry on next interval...");
+                }
             }
         }
     }
