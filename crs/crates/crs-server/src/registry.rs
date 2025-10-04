@@ -129,6 +129,19 @@ impl Registry {
             };
         }
     }
+
+    /// Set a client's last heartbeat time (for testing)
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_last_heartbeat(
+        &self,
+        client_id: ClientId,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    ) {
+        let mut clients = self.clients.write().unwrap();
+        if let Some(client) = clients.get_mut(&client_id) {
+            client.last_heartbeat = timestamp;
+        }
+    }
 }
 
 impl Default for Registry {
@@ -142,4 +155,180 @@ impl Default for Registry {
 pub enum RegistryError {
     #[error("Client not found: {0}")]
     ClientNotFound(ClientId),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn create_test_client_info(hostname: &str) -> ClientInfo {
+        ClientInfo {
+            hostname: hostname.to_string(),
+            os: "linux".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            version: "1.0.0".to_string(),
+            tags: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_registry_new_client_registration() {
+        let registry = Registry::new();
+        let info = create_test_client_info("testhost");
+
+        let client_id = registry.register(info.clone());
+
+        // Verify client is in registry
+        let clients = registry.list_clients();
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].client_id, client_id);
+        assert_eq!(clients[0].info.hostname, "testhost");
+        assert_eq!(clients[0].status, ClientStatus::Online);
+    }
+
+    #[test]
+    fn test_registry_re_registration_preserves_timestamp() {
+        let registry = Registry::new();
+        let info = create_test_client_info("testhost");
+
+        // First registration
+        let client_id = registry.register(info.clone());
+        let clients = registry.list_clients();
+        let first_registered_at = clients[0].registered_at;
+
+        // Wait a bit then re-register
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        registry.register(info.clone());
+
+        // Verify registration timestamp is preserved
+        let clients = registry.list_clients();
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].client_id, client_id);
+        assert_eq!(clients[0].registered_at, first_registered_at);
+    }
+
+    #[test]
+    fn test_registry_heartbeat_updates_timestamp() {
+        let registry = Registry::new();
+        let info = create_test_client_info("testhost");
+
+        let client_id = registry.register(info);
+        let clients = registry.list_clients();
+        let first_heartbeat = clients[0].last_heartbeat;
+
+        // Wait a bit then send heartbeat
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        registry.heartbeat(client_id).unwrap();
+
+        // Verify heartbeat timestamp updated
+        let clients = registry.list_clients();
+        assert!(clients[0].last_heartbeat > first_heartbeat);
+        assert_eq!(clients[0].status, ClientStatus::Online);
+    }
+
+    #[test]
+    fn test_registry_heartbeat_unknown_client() {
+        let registry = Registry::new();
+        let unknown_id = ClientId::from_client_data("unknown", "linux");
+
+        let result = registry.heartbeat(unknown_id);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            RegistryError::ClientNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn test_registry_status_transitions() {
+        let registry = Registry::new();
+        let info = create_test_client_info("testhost");
+
+        let client_id = registry.register(info);
+
+        // Manually set heartbeat to old time to test status updates
+        {
+            let mut clients = registry.clients.write().unwrap();
+            let client = clients.get_mut(&client_id).unwrap();
+
+            // Set to 90 seconds ago (should be Stale)
+            client.last_heartbeat =
+                Utc::now() - Duration::try_seconds(90).unwrap();
+        }
+
+        registry.update_statuses();
+        let clients = registry.list_clients();
+        assert_eq!(clients[0].status, ClientStatus::Stale);
+
+        // Set to 200 seconds ago (should be Offline)
+        {
+            let mut clients = registry.clients.write().unwrap();
+            let client = clients.get_mut(&client_id).unwrap();
+            client.last_heartbeat =
+                Utc::now() - Duration::try_seconds(200).unwrap();
+        }
+
+        registry.update_statuses();
+        let clients = registry.list_clients();
+        assert_eq!(clients[0].status, ClientStatus::Offline);
+
+        // Set to 30 seconds ago (should be Online)
+        {
+            let mut clients = registry.clients.write().unwrap();
+            let client = clients.get_mut(&client_id).unwrap();
+            client.last_heartbeat =
+                Utc::now() - Duration::try_seconds(30).unwrap();
+        }
+
+        registry.update_statuses();
+        let clients = registry.list_clients();
+        assert_eq!(clients[0].status, ClientStatus::Online);
+    }
+
+    #[test]
+    fn test_registry_multiple_clients() {
+        let registry = Registry::new();
+
+        let info1 = create_test_client_info("host1");
+        let info2 = create_test_client_info("host2");
+        let info3 = create_test_client_info("host3");
+
+        registry.register(info1);
+        registry.register(info2);
+        registry.register(info3);
+
+        let clients = registry.list_clients();
+        assert_eq!(clients.len(), 3);
+
+        // Verify all have unique IDs
+        let mut ids: Vec<_> =
+            clients.iter().map(|c| c.client_id).collect();
+        ids.sort_by_key(|id| id.0.as_u128());
+        ids.dedup();
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn test_registry_clone_shares_data() {
+        let registry1 = Registry::new();
+        let info = create_test_client_info("testhost");
+
+        registry1.register(info);
+
+        // Clone registry
+        let registry2 = registry1.clone();
+
+        // Both should see the same client
+        assert_eq!(registry1.list_clients().len(), 1);
+        assert_eq!(registry2.list_clients().len(), 1);
+
+        // Register via clone
+        let info2 = create_test_client_info("host2");
+        registry2.register(info2);
+
+        // Both should see both clients
+        assert_eq!(registry1.list_clients().len(), 2);
+        assert_eq!(registry2.list_clients().len(), 2);
+    }
 }

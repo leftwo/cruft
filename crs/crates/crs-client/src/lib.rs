@@ -252,3 +252,83 @@ pub fn add_client_tags(
 ) {
     tags.insert(key, value);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_client_creation() {
+        let result = CrsClient::new(
+            "http://127.0.0.1:8081".to_string(),
+            "1.0.0".to_string(),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let client = result.unwrap();
+        assert_eq!(client.server_url, "http://127.0.0.1:8081");
+        assert_eq!(client.client_info.version, "1.0.0");
+        assert_eq!(client.client_info.os, std::env::consts::OS);
+        assert!(client.client_id.is_none()); // Not registered yet
+    }
+
+    #[tokio::test]
+    async fn test_client_detects_hostname() {
+        let client = CrsClient::new(
+            "http://127.0.0.1:8081".to_string(),
+            "1.0.0".to_string(),
+        )
+        .await
+        .unwrap();
+
+        // Should have detected a hostname
+        assert!(!client.client_info.hostname.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_client_has_ip_address() {
+        let client = CrsClient::new(
+            "http://127.0.0.1:8081".to_string(),
+            "1.0.0".to_string(),
+        )
+        .await
+        .unwrap();
+
+        // Should have an IP address (either detected or fallback)
+        assert!(!client.client_info.ip_address.is_empty());
+    }
+
+    #[test]
+    fn test_add_client_tags() {
+        let mut tags = HashMap::new();
+        add_client_tags(&mut tags, "env".to_string(), "test".to_string());
+        add_client_tags(
+            &mut tags,
+            "region".to_string(),
+            "us-west".to_string(),
+        );
+
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags.get("env"), Some(&"test".to_string()));
+        assert_eq!(tags.get("region"), Some(&"us-west".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_requires_registration() {
+        let client = CrsClient::new(
+            "http://127.0.0.1:8081".to_string(),
+            "1.0.0".to_string(),
+        )
+        .await
+        .unwrap();
+
+        // Heartbeat should fail if not registered
+        let result = client.heartbeat().await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("client not registered"));
+    }
+}

@@ -197,3 +197,139 @@ pub enum CrsError {
     #[error("Internal server error: {0}")]
     Internal(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_id_same_inputs_same_uuid() {
+        let id1 = ClientId::from_client_data("testhost", "linux");
+        let id2 = ClientId::from_client_data("testhost", "linux");
+        assert_eq!(id1, id2, "Same hostname and OS should generate same UUID");
+    }
+
+    #[test]
+    fn test_client_id_different_hostname() {
+        let id1 = ClientId::from_client_data("host1", "linux");
+        let id2 = ClientId::from_client_data("host2", "linux");
+        assert_ne!(id1, id2, "Different hostnames should generate different UUIDs");
+    }
+
+    #[test]
+    fn test_client_id_different_os() {
+        let id1 = ClientId::from_client_data("testhost", "linux");
+        let id2 = ClientId::from_client_data("testhost", "macos");
+        assert_ne!(id1, id2, "Different OS should generate different UUIDs");
+    }
+
+    #[test]
+    fn test_client_id_is_valid_uuid_v5() {
+        let id = ClientId::from_client_data("testhost", "linux");
+        // UUID v5 has version bits set to 0101 (5)
+        assert_eq!(id.0.get_version_num(), 5, "Should be UUID v5");
+    }
+
+    #[test]
+    fn test_client_info_serialization_roundtrip() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "production".to_string());
+
+        let info = ClientInfo {
+            hostname: "testhost".to_string(),
+            os: "linux".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            version: "1.0.0".to_string(),
+            tags,
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: ClientInfo = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(info.hostname, deserialized.hostname);
+        assert_eq!(info.os, deserialized.os);
+        assert_eq!(info.ip_address, deserialized.ip_address);
+        assert_eq!(info.version, deserialized.version);
+        assert_eq!(info.tags, deserialized.tags);
+    }
+
+    #[test]
+    fn test_client_info_client_id_method() {
+        let info = ClientInfo {
+            hostname: "testhost".to_string(),
+            os: "linux".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            version: "1.0.0".to_string(),
+            tags: HashMap::new(),
+        };
+
+        let id1 = info.client_id();
+        let id2 = ClientId::from_client_data("testhost", "linux");
+        assert_eq!(id1, id2, "client_id() method should produce correct ID");
+    }
+
+    #[test]
+    fn test_client_info_empty_tags() {
+        let info = ClientInfo {
+            hostname: "testhost".to_string(),
+            os: "linux".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            version: "1.0.0".to_string(),
+            tags: HashMap::new(),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: ClientInfo = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.tags.is_empty());
+    }
+
+    #[test]
+    fn test_client_info_multiple_tags() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "prod".to_string());
+        tags.insert("region".to_string(), "us-west".to_string());
+        tags.insert("role".to_string(), "worker".to_string());
+
+        let info = ClientInfo {
+            hostname: "testhost".to_string(),
+            os: "linux".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            version: "1.0.0".to_string(),
+            tags: tags.clone(),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: ClientInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.tags.len(), 3);
+        assert_eq!(deserialized.tags.get("env"), Some(&"prod".to_string()));
+        assert_eq!(deserialized.tags.get("region"), Some(&"us-west".to_string()));
+        assert_eq!(deserialized.tags.get("role"), Some(&"worker".to_string()));
+    }
+
+    #[test]
+    fn test_client_status_serialization() {
+        let status = ClientStatus::Online;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"online\"");
+
+        let status = ClientStatus::Stale;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"stale\"");
+
+        let status = ClientStatus::Offline;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"offline\"");
+    }
+
+    #[test]
+    fn test_client_status_deserialization() {
+        let status: ClientStatus = serde_json::from_str("\"online\"").unwrap();
+        assert_eq!(status, ClientStatus::Online);
+
+        let status: ClientStatus = serde_json::from_str("\"stale\"").unwrap();
+        assert_eq!(status, ClientStatus::Stale);
+
+        let status: ClientStatus = serde_json::from_str("\"offline\"").unwrap();
+        assert_eq!(status, ClientStatus::Offline);
+    }
+}
