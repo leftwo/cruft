@@ -36,6 +36,7 @@ const STALE_THRESHOLD_SECS: i64 = 80;
 /// #     os: "Linux".to_string(),
 /// #     ip_address: "192.168.1.100".to_string(),
 /// #     version: "1.0.0".to_string(),
+/// #     host_id: None,
 /// #     tags: Default::default(),
 /// # };
 /// let client_id = registry.register(client_info);
@@ -171,6 +172,7 @@ mod tests {
             os: "linux".to_string(),
             ip_address: "192.168.1.100".to_string(),
             version: "1.0.0".to_string(),
+            host_id: None,
             tags: HashMap::new(),
         }
     }
@@ -233,7 +235,7 @@ mod tests {
     #[test]
     fn test_registry_heartbeat_unknown_client() {
         let registry = Registry::new();
-        let unknown_id = ClientId::from_client_data("unknown", "linux");
+        let unknown_id = ClientId::from_client_data("unknown", "linux", None);
 
         let result = registry.heartbeat(unknown_id);
         assert!(result.is_err());

@@ -39,6 +39,7 @@
 use anyhow::{Context, Result};
 use crs_common::{ClientId, ClientInfo, HeartbeatRequest, RegisterRequest};
 use std::collections::HashMap;
+use std::process::Command;
 use std::time::Duration;
 
 /// CRS client
@@ -75,11 +76,15 @@ impl CrsClient {
         let ip_address =
             Self::get_local_ip().unwrap_or_else(|| "0.0.0.0".to_string());
 
+        // Get host ID (best effort)
+        let host_id = Self::get_host_id();
+
         let client_info = ClientInfo {
             hostname,
             os,
             ip_address,
             version,
+            host_id,
             tags: HashMap::new(),
         };
 
@@ -239,6 +244,35 @@ impl CrsClient {
     fn get_local_ip() -> Option<String> {
         // Try to get a non-loopback local IP
         local_ip_address::local_ip().ok().map(|ip| ip.to_string())
+    }
+
+    /// Execute a system command and return its output
+    ///
+    /// Gracefully handles failures by returning None if the command
+    /// fails to execute or produces non-zero exit status.
+    fn exec_command(cmd: &str, args: &[&str]) -> Option<String> {
+        Command::new(cmd)
+            .args(args)
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Get the system host ID
+    ///
+    /// Attempts to retrieve the host ID using the `hostid` command.
+    /// Returns None if the command is not available or fails.
+    fn get_host_id() -> Option<String> {
+        Self::exec_command("hostid", &[])
     }
 }
 
