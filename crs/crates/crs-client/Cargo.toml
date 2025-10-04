@@ -1,0 +1,20 @@
+[package]
+name = "crs-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "crs-client"
+path = "src/main.rs"
+
+[dependencies]
+crs-common = { path = "../crs-common" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+reqwest.workspace = true
