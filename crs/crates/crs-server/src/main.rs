@@ -33,10 +33,11 @@
 //! # Client Status
 //!
 //! Clients are automatically categorized based on their last heartbeat:
-//! - **Online**: Last heartbeat < 60 seconds ago
-//! - **Stale**: Last heartbeat 60-180 seconds ago
-//! - **Offline**: Last heartbeat > 180 seconds ago
+//! - **Online**: Last heartbeat < 40 seconds ago (< 1 missed heartbeat)
+//! - **Stale**: Last heartbeat 40-80 seconds ago (1-3 missed heartbeats)
+//! - **Offline**: Last heartbeat > 80 seconds ago (4+ missed heartbeats)
 //!
+//! Heartbeat interval is 20 seconds.
 //! Status updates occur every 30 seconds via a background task.
 
 mod api;

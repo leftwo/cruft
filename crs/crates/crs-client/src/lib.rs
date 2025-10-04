@@ -92,7 +92,7 @@ impl CrsClient {
             server_url,
             client_info,
             client_id: None,
-            heartbeat_interval: Duration::from_secs(30),
+            heartbeat_interval: Duration::from_secs(20),
             http_client,
         })
     }
@@ -189,8 +189,8 @@ impl CrsClient {
                 }
                 Err(e) => {
                     eprintln!("Failed to register with server: {}", e);
-                    eprintln!("Retrying in 5 seconds...");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    eprintln!("Retrying in 10 seconds...");
+                    tokio::time::sleep(Duration::from_secs(10)).await;
                 }
             }
         }
@@ -220,8 +220,8 @@ impl CrsClient {
                             }
                             Err(e) => {
                                 eprintln!("Failed to re-register: {}", e);
-                                eprintln!("Retrying in 5 seconds...");
-                                tokio::time::sleep(Duration::from_secs(5))
+                                eprintln!("Retrying in 10 seconds...");
+                                tokio::time::sleep(Duration::from_secs(10))
                                     .await;
                             }
                         }

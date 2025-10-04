@@ -50,7 +50,7 @@ pub async fn register(
 
     Ok(HttpResponseOk(RegisterResponse {
         client_id,
-        heartbeat_interval_secs: 30,
+        heartbeat_interval_secs: 20,
     }))
 }
 

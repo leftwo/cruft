@@ -91,10 +91,10 @@ async fn test_client_status_online_to_stale() {
     let clients = registry.list_clients();
     assert_eq!(clients[0].status, ClientStatus::Online);
 
-    // Manually set heartbeat to 90 seconds ago
+    // Manually set heartbeat to 50 seconds ago
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(90).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(50).unwrap(),
     );
 
     // Update statuses
@@ -112,10 +112,10 @@ async fn test_client_status_stale_to_offline() {
 
     let client_id = registry.register(info);
 
-    // Manually set heartbeat to 200 seconds ago
+    // Manually set heartbeat to 100 seconds ago
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(200).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(100).unwrap(),
     );
 
     // Update statuses
@@ -183,7 +183,7 @@ async fn test_heartbeat_returns_to_online() {
     // Set client to stale
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(90).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(50).unwrap(),
     );
     registry.update_statuses();
 

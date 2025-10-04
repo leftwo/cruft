@@ -37,9 +37,9 @@
 //! # Client Status
 //!
 //! Clients are categorized into three states:
-//! - [`ClientStatus::Online`] - Recent heartbeat (< 60 seconds)
-//! - [`ClientStatus::Stale`] - Heartbeat between 60-180 seconds ago
-//! - [`ClientStatus::Offline`] - No heartbeat for 180+ seconds
+//! - [`ClientStatus::Online`] - Recent heartbeat (< 40 seconds, < 1 missed)
+//! - [`ClientStatus::Stale`] - Heartbeat 40-80 seconds ago (1-3 missed)
+//! - [`ClientStatus::Offline`] - No heartbeat for 80+ seconds (4+ missed)
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

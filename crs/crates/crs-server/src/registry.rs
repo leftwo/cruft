@@ -12,8 +12,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 /// Thresholds for client status transitions (in seconds)
-const ONLINE_THRESHOLD_SECS: i64 = 60;
-const STALE_THRESHOLD_SECS: i64 = 180;
+/// Heartbeat interval is 20 seconds
+/// Stale: 1 missed heartbeat (40 seconds)
+/// Offline: 4 missed heartbeats (80 seconds)
+const ONLINE_THRESHOLD_SECS: i64 = 40;
+const STALE_THRESHOLD_SECS: i64 = 80;
 
 /// Registry for tracking connected clients
 ///
@@ -252,33 +255,33 @@ mod tests {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
 
-            // Set to 90 seconds ago (should be Stale)
+            // Set to 50 seconds ago (should be Stale)
             client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(90).unwrap();
+                Utc::now() - Duration::try_seconds(50).unwrap();
         }
 
         registry.update_statuses();
         let clients = registry.list_clients();
         assert_eq!(clients[0].status, ClientStatus::Stale);
 
-        // Set to 200 seconds ago (should be Offline)
+        // Set to 100 seconds ago (should be Offline)
         {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
             client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(200).unwrap();
+                Utc::now() - Duration::try_seconds(100).unwrap();
         }
 
         registry.update_statuses();
         let clients = registry.list_clients();
         assert_eq!(clients[0].status, ClientStatus::Offline);
 
-        // Set to 30 seconds ago (should be Online)
+        // Set to 20 seconds ago (should be Online)
         {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
             client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(30).unwrap();
+                Utc::now() - Duration::try_seconds(20).unwrap();
         }
 
         registry.update_statuses();
