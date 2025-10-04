@@ -15,23 +15,22 @@ struct Args {
     /// URL of the CRS server (required)
     #[arg(short, long)]
     server: String,
-
-    /// Client version string
-    #[arg(short, long, default_value = "0.1.0")]
-    version: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Get the version from Cargo.toml at compile time
+    let version = env!("CARGO_PKG_VERSION").to_string();
+
     println!("CRS Client starting...");
     println!("Server: {}", args.server);
-    println!("Version: {}", args.version);
+    println!("Client Version: {}", version);
     println!();
 
     // Create and run the client
-    let client = crs_client::CrsClient::new(args.server, args.version).await?;
+    let client = crs_client::CrsClient::new(args.server, version).await?;
 
     println!("Starting heartbeat loop...");
     client.run().await?;
