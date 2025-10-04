@@ -126,7 +126,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
-fn display_status(response: ListClientsResponse, _server_url: &str) {
+fn display_status(response: ListClientsResponse) {
     println!("{}", "=".repeat(80));
     println!("CRS Server Status");
     println!("{}", "=".repeat(80));
@@ -189,7 +189,7 @@ async fn main() -> Result<()> {
     let config = resolve_config(args)?;
 
     let response = fetch_clients(&config.server).await?;
-    display_status(response, &config.server);
+    display_status(response);
 
     Ok(())
 }
