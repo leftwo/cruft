@@ -7,4 +7,4 @@
 # Command line options will override settings in this file.
 
 # URL of the CRS server (required)
-server = "http://127.0.0.1:8081"
+server = "http://172.20.1.52:8081"
