@@ -1,6 +1,45 @@
 // Copyright 2025 Oxide Computer Company
 
 //! Common types and protocol definitions for the Central Registry Service (CRS)
+//!
+//! This crate contains shared data structures and protocol definitions used by
+//! both the CRS server and client implementations.
+//!
+//! # Protocol Overview
+//!
+//! The CRS protocol is based on REST API with JSON payloads. The protocol
+//! supports three main operations:
+//!
+//! ## Registration
+//!
+//! Clients send a [`RegisterRequest`] containing their information (hostname,
+//! OS, IP address, version, and optional tags). The server responds with a
+//! [`RegisterResponse`] containing the client's deterministic ID and the
+//! recommended heartbeat interval.
+//!
+//! ## Heartbeat
+//!
+//! Clients periodically send [`HeartbeatRequest`] messages to indicate they
+//! are still online. The server responds with [`HeartbeatResponse`] containing
+//! the current server time.
+//!
+//! ## Client Listing
+//!
+//! The server provides a [`ListClientsResponse`] containing all registered
+//! clients with their current status and metadata.
+//!
+//! # Client ID Generation
+//!
+//! Client IDs are deterministic UUIDs (v5) generated from the client's
+//! hostname, operating system, and IP address. This ensures the same client
+//! receives the same ID across restarts.
+//!
+//! # Client Status
+//!
+//! Clients are categorized into three states:
+//! - [`ClientStatus::Online`] - Recent heartbeat (< 60 seconds)
+//! - [`ClientStatus::Stale`] - Heartbeat between 60-180 seconds ago
+//! - [`ClientStatus::Offline`] - No heartbeat for 180+ seconds
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,9 @@
 // Copyright 2025 Oxide Computer Company
 
 //! REST API handlers
+//!
+//! This module contains the Dropshot endpoint handlers for the CRS REST API.
+//! All endpoints use JSON for request and response bodies.
 
 use crate::registry::Registry;
 use chrono::Utc;
@@ -13,7 +16,10 @@ use dropshot::{
 };
 
 /// Context passed to all API handlers
+///
+/// Contains shared state that all endpoint handlers can access.
 pub struct ApiContext {
+    /// The client registry
     pub registry: Registry,
 }
 

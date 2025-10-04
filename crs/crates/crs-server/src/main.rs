@@ -7,12 +7,37 @@
 //! information such as hostname, OS, IP address, and version. The server
 //! tracks which clients are online based on periodic heartbeats.
 //!
-//! The server provides:
-//! - REST API endpoints for client registration and heartbeat reporting
-//! - A web dashboard showing all registered clients and their status
-//! - Automatic status updates (online/stale/offline) based on heartbeat age
+//! # Features
 //!
-//! The server listens on 127.0.0.1:8081 by default.
+//! - **REST API endpoints** for client registration and heartbeat reporting
+//! - **Web dashboard** showing all registered clients and their status
+//! - **Automatic status updates** (online/stale/offline) based on heartbeat age
+//! - **Deterministic client IDs** generated from hostname, OS, and IP address
+//!
+//! # Usage
+//!
+//! Start the server:
+//! ```bash
+//! cargo run --bin crs-server
+//! ```
+//!
+//! The server listens on `127.0.0.1:8081` by default.
+//!
+//! # API Endpoints
+//!
+//! - `POST /api/register` - Register a new client
+//! - `POST /api/heartbeat` - Send heartbeat from registered client
+//! - `GET /api/clients` - List all registered clients
+//! - `GET /` - Web dashboard
+//!
+//! # Client Status
+//!
+//! Clients are automatically categorized based on their last heartbeat:
+//! - **Online**: Last heartbeat < 60 seconds ago
+//! - **Stale**: Last heartbeat 60-180 seconds ago
+//! - **Offline**: Last heartbeat > 180 seconds ago
+//!
+//! Status updates occur every 30 seconds via a background task.
 
 mod api;
 mod registry;

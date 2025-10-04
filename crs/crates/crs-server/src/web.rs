@@ -1,6 +1,9 @@
 // Copyright 2025 Oxide Computer Company
 
 //! Web dashboard
+//!
+//! This module provides the HTML web dashboard endpoint for viewing
+//! registered clients in a web browser.
 
 use crate::api::ApiContext;
 use crs_common::ClientStatus;

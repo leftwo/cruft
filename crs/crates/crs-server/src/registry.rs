@@ -1,6 +1,10 @@
 // Copyright 2025 Oxide Computer Company
 
 //! Client registry implementation
+//!
+//! This module provides the [`Registry`] type which manages all registered
+//! clients and their status. The registry is thread-safe and can be shared
+//! across multiple async tasks.
 
 use chrono::{Duration, Utc};
 use crs_common::{ClientId, ClientInfo, ClientStatus, RegisteredClient};
@@ -12,6 +16,27 @@ const ONLINE_THRESHOLD_SECS: i64 = 60;
 const STALE_THRESHOLD_SECS: i64 = 180;
 
 /// Registry for tracking connected clients
+///
+/// The registry maintains an in-memory map of all registered clients and
+/// their current status. It is thread-safe and can be cloned cheaply (uses
+/// `Arc` internally).
+///
+/// # Example
+///
+/// ```no_run
+/// # use crs_server::registry::Registry;
+/// # use crs_common::ClientInfo;
+/// let registry = Registry::new();
+/// // Register a client (would normally come from API request)
+/// # let client_info = ClientInfo {
+/// #     hostname: "example".to_string(),
+/// #     os: "Linux".to_string(),
+/// #     ip_address: "192.168.1.100".to_string(),
+/// #     version: "1.0.0".to_string(),
+/// #     tags: Default::default(),
+/// # };
+/// let client_id = registry.register(client_info);
+/// ```
 #[derive(Clone)]
 pub struct Registry {
     clients: Arc<RwLock<HashMap<ClientId, RegisteredClient>>>,
