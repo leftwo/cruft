@@ -31,7 +31,7 @@
 //! # Client ID Generation
 //!
 //! Client IDs are deterministic UUIDs (v5) generated from the client's
-//! hostname, operating system, and IP address. This ensures the same client
+//! hostname and operating system. This ensures the same client
 //! receives the same ID across restarts.
 //!
 //! # Client Status
@@ -61,16 +61,12 @@ use uuid::Uuid;
 pub struct ClientId(pub Uuid);
 
 impl ClientId {
-    /// Generate a deterministic client ID from hostname, OS, and IP address
+    /// Generate a deterministic client ID from hostname and OS
     /// This ensures the same client gets the same ID across restarts
-    pub fn from_client_data(
-        hostname: &str,
-        os: &str,
-        ip_address: &str,
-    ) -> Self {
+    pub fn from_client_data(hostname: &str, os: &str) -> Self {
         // Create a deterministic UUID v5 using a namespace and the client data
         let namespace = Uuid::NAMESPACE_DNS;
-        let data = format!("{}:{}:{}", hostname, os, ip_address);
+        let data = format!("{}:{}", hostname, os);
         Self(Uuid::new_v5(&namespace, data.as_bytes()))
     }
 }
@@ -104,7 +100,7 @@ pub struct ClientInfo {
 impl ClientInfo {
     /// Calculate the deterministic client ID for this client info
     pub fn client_id(&self) -> ClientId {
-        ClientId::from_client_data(&self.hostname, &self.os, &self.ip_address)
+        ClientId::from_client_data(&self.hostname, &self.os)
     }
 }
 

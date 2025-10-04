@@ -18,7 +18,6 @@
 //! Client IDs are deterministic UUIDs (v5) generated from:
 //! - Hostname
 //! - Operating system
-//! - IP address
 //!
 //! This ensures the same client receives the same ID across restarts.
 //!

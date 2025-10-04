@@ -39,7 +39,14 @@ pub async fn register(
     let request = body.into_inner();
     let registry = &ctx.context().registry;
 
-    let client_id = registry.register(request.client_info);
+    // Extract the client's actual IP address from the connection
+    let client_ip = ctx.request.remote_addr().ip().to_string();
+
+    // Override the IP address with what we actually see
+    let mut client_info = request.client_info;
+    client_info.ip_address = client_ip;
+
+    let client_id = registry.register(client_info);
 
     Ok(HttpResponseOk(RegisterResponse {
         client_id,

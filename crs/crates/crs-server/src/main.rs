@@ -12,7 +12,7 @@
 //! - **REST API endpoints** for client registration and heartbeat reporting
 //! - **Web dashboard** showing all registered clients and their status
 //! - **Automatic status updates** (online/stale/offline) based on heartbeat age
-//! - **Deterministic client IDs** generated from hostname, OS, and IP address
+//! - **Deterministic client IDs** generated from hostname and OS
 //!
 //! # Usage
 //!
@@ -58,7 +58,7 @@ use std::time::Duration;
 #[command(version, about, long_about = None)]
 struct Args {
     /// IP address to bind to
-    #[arg(short = 'a', long, default_value = "127.0.0.1")]
+    #[arg(short, long, default_value = "127.0.0.1")]
     server_address: String,
 
     /// Port to listen on
