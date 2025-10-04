@@ -7,7 +7,8 @@
 
 use crate::api::ApiContext;
 use crs_common::ClientStatus;
-use dropshot::{endpoint, HttpError, HttpResponseOk, RequestContext};
+use dropshot::{endpoint, Body, HttpError, RequestContext};
+use http::{Response, StatusCode};
 
 /// Serve the web dashboard
 ///
@@ -23,7 +24,7 @@ use dropshot::{endpoint, HttpError, HttpResponseOk, RequestContext};
 }]
 pub async fn dashboard(
     ctx: RequestContext<ApiContext>,
-) -> Result<HttpResponseOk<String>, HttpError> {
+) -> Result<Response<Body>, HttpError> {
     let registry = &ctx.context().registry;
     let clients = registry.list_clients();
 
@@ -137,5 +138,14 @@ pub async fn dashboard(
         rows
     );
 
-    Ok(HttpResponseOk(html))
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/html; charset=utf-8")
+        .body(html.into())
+        .map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to build response: {}",
+                e
+            ))
+        })
 }

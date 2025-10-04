@@ -45,12 +45,26 @@ mod web;
 
 use anyhow::Result;
 use api::ApiContext;
+use clap::Parser;
 use dropshot::{
     ConfigDropshot, ConfigLogging, ConfigLoggingLevel, HttpServerStarter,
 };
 use registry::Registry;
 use std::net::SocketAddr;
 use std::time::Duration;
+
+/// CRS Server - Central Registry Service
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// IP address to bind to
+    #[arg(short = 'a', long, default_value = "127.0.0.1")]
+    server_address: String,
+
+    /// Port to listen on
+    #[arg(short, long, default_value = "8081")]
+    port: u16,
+}
 
 /// Main entry point for the CRS server
 ///
@@ -59,6 +73,7 @@ use std::time::Duration;
 /// and web dashboard.
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
     // Create the registry
     let registry = Registry::new();
 
@@ -81,9 +96,10 @@ async fn main() -> Result<()> {
         .expect("failed to create logger");
 
     // Configure dropshot server
-    let bind_address: SocketAddr = "127.0.0.1:8081"
-        .parse()
-        .expect("failed to parse bind address");
+    let bind_address: SocketAddr =
+        format!("{}:{}", args.server_address, args.port)
+            .parse()
+            .expect("failed to parse bind address");
     let config = ConfigDropshot {
         bind_address,
         request_body_max_bytes: 1024 * 1024, // 1MB
