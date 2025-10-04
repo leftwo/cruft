@@ -43,10 +43,7 @@ async fn test_registration_flow() {
         Ok(resp) if resp.status().is_success() => {
             let register_response: crs_common::RegisterResponse =
                 resp.json().await.unwrap();
-            assert_eq!(
-                register_response.client_id,
-                info.client_id()
-            );
+            assert_eq!(register_response.client_id, info.client_id());
             assert!(register_response.heartbeat_interval_secs > 0);
         }
         _ => {

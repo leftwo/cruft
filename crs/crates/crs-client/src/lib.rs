@@ -303,11 +303,7 @@ mod tests {
     fn test_add_client_tags() {
         let mut tags = HashMap::new();
         add_client_tags(&mut tags, "env".to_string(), "test".to_string());
-        add_client_tags(
-            &mut tags,
-            "region".to_string(),
-            "us-west".to_string(),
-        );
+        add_client_tags(&mut tags, "region".to_string(), "us-west".to_string());
 
         assert_eq!(tags.len(), 2);
         assert_eq!(tags.get("env"), Some(&"test".to_string()));

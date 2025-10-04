@@ -213,7 +213,10 @@ mod tests {
     fn test_client_id_different_hostname() {
         let id1 = ClientId::from_client_data("host1", "linux");
         let id2 = ClientId::from_client_data("host2", "linux");
-        assert_ne!(id1, id2, "Different hostnames should generate different UUIDs");
+        assert_ne!(
+            id1, id2,
+            "Different hostnames should generate different UUIDs"
+        );
     }
 
     #[test]
@@ -302,7 +305,10 @@ mod tests {
         let deserialized: ClientInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.tags.len(), 3);
         assert_eq!(deserialized.tags.get("env"), Some(&"prod".to_string()));
-        assert_eq!(deserialized.tags.get("region"), Some(&"us-west".to_string()));
+        assert_eq!(
+            deserialized.tags.get("region"),
+            Some(&"us-west".to_string())
+        );
         assert_eq!(deserialized.tags.get("role"), Some(&"worker".to_string()));
     }
 

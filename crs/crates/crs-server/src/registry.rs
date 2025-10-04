@@ -302,8 +302,7 @@ mod tests {
         assert_eq!(clients.len(), 3);
 
         // Verify all have unique IDs
-        let mut ids: Vec<_> =
-            clients.iter().map(|c| c.client_id).collect();
+        let mut ids: Vec<_> = clients.iter().map(|c| c.client_id).collect();
         ids.sort_by_key(|id| id.0.as_u128());
         ids.dedup();
         assert_eq!(ids.len(), 3);

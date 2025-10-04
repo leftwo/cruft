@@ -51,6 +51,27 @@ pub async fn dashboard(
             ClientStatus::Offline => "offline",
         };
 
+        // Calculate time connected
+        let now = chrono::Utc::now();
+        let connected_duration = now - client.registered_at;
+        let connected_str = if connected_duration.num_days() > 0 {
+            format!(
+                "{}d {}h",
+                connected_duration.num_days(),
+                connected_duration.num_hours() % 24
+            )
+        } else if connected_duration.num_hours() > 0 {
+            format!(
+                "{}h {}m",
+                connected_duration.num_hours(),
+                connected_duration.num_minutes() % 60
+            )
+        } else if connected_duration.num_minutes() > 0 {
+            format!("{}m", connected_duration.num_minutes())
+        } else {
+            format!("{}s", connected_duration.num_seconds())
+        };
+
         rows.push_str(&format!(
             r#"
         <tr>
@@ -60,6 +81,7 @@ pub async fn dashboard(
             <td>{}</td>
             <td style="color: {}; font-weight: bold;">{}</td>
             <td>{}</td>
+            <td>{}</td>
         </tr>"#,
             client.info.hostname,
             client.info.ip_address,
@@ -68,6 +90,7 @@ pub async fn dashboard(
             status_color,
             status_text,
             client.last_heartbeat.format("%Y-%m-%d %H:%M:%S UTC"),
+            connected_str,
         ));
     }
 
@@ -132,16 +155,12 @@ pub async fn dashboard(
             <th>IP Address</th>
             <th>OS</th>
             <th>Version</th>
-            <th>Status</th>
-            <th>Last Heartbeat</th>
         </tr>
         <tr class="server-info">
             <td>{}</td>
             <td>{}</td>
             <td>{}</td>
             <td>{}</td>
-            <td style="color: green; font-weight: bold;">running</td>
-            <td>N/A</td>
         </tr>
     </table>
 
@@ -154,6 +173,7 @@ pub async fn dashboard(
             <th>Version</th>
             <th>Status</th>
             <th>Last Heartbeat</th>
+            <th>Time Connected</th>
         </tr>
         {}
     </table>
