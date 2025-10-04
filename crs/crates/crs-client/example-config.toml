@@ -1,0 +1,10 @@
+# Example CRS Client Configuration File
+#
+# This file shows all available configuration options for the CRS client.
+# Copy this file and modify it for your needs, then use it with:
+#   crs-client --config path/to/config.toml
+#
+# Command line options will override settings in this file.
+
+# URL of the CRS server (required)
+server = "http://127.0.0.1:8081"
