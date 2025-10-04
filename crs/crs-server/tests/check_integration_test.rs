@@ -52,7 +52,7 @@ async fn test_check_reflects_status_changes() {
     // Make it stale
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(50).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(25).unwrap(),
     );
     registry.update_statuses();
 
@@ -62,7 +62,7 @@ async fn test_check_reflects_status_changes() {
     // Make it offline
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(100).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
     );
     registry.update_statuses();
 
@@ -90,11 +90,11 @@ async fn test_check_shows_multiple_client_states() {
     );
     registry.set_last_heartbeat(
         id2,
-        Utc::now() - chrono::Duration::try_seconds(50).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(25).unwrap(),
     );
     registry.set_last_heartbeat(
         id3,
-        Utc::now() - chrono::Duration::try_seconds(100).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
     );
 
     registry.update_statuses();
@@ -131,7 +131,7 @@ async fn test_check_client_reconnection_updates() {
     // Make client offline
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(100).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
     );
     registry.update_statuses();
 

@@ -12,11 +12,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 /// Thresholds for client status transitions (in seconds)
-/// Heartbeat interval is 20 seconds
-/// Stale: 1 missed heartbeat (40 seconds)
-/// Offline: 4 missed heartbeats (80 seconds)
-const ONLINE_THRESHOLD_SECS: i64 = 40;
-const STALE_THRESHOLD_SECS: i64 = 80;
+/// Heartbeat interval is 10 seconds
+/// Stale: 2x heartbeat interval (20 seconds)
+/// Offline: 3x heartbeat interval (30 seconds)
+const HEARTBEAT_INTERVAL_SECS: i64 = 10;
+const ONLINE_THRESHOLD_SECS: i64 = HEARTBEAT_INTERVAL_SECS * 2;
+const STALE_THRESHOLD_SECS: i64 = HEARTBEAT_INTERVAL_SECS * 3;
 
 /// Registry for tracking connected clients
 ///
@@ -257,33 +258,33 @@ mod tests {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
 
-            // Set to 50 seconds ago (should be Stale)
+            // Set to 25 seconds ago (should be Stale - between 20s and 30s)
             client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(50).unwrap();
+                Utc::now() - Duration::try_seconds(25).unwrap();
         }
 
         registry.update_statuses();
         let clients = registry.list_clients();
         assert_eq!(clients[0].status, ClientStatus::Stale);
 
-        // Set to 100 seconds ago (should be Offline)
+        // Set to 40 seconds ago (should be Offline - > 30s)
         {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
             client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(100).unwrap();
+                Utc::now() - Duration::try_seconds(40).unwrap();
         }
 
         registry.update_statuses();
         let clients = registry.list_clients();
         assert_eq!(clients[0].status, ClientStatus::Offline);
 
-        // Set to 20 seconds ago (should be Online)
+        // Set to 10 seconds ago (should be Online - < 20s)
         {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
             client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(20).unwrap();
+                Utc::now() - Duration::try_seconds(10).unwrap();
         }
 
         registry.update_statuses();

@@ -97,7 +97,7 @@ impl CrsClient {
             server_url,
             client_info,
             client_id: None,
-            heartbeat_interval: Duration::from_secs(20),
+            heartbeat_interval: Duration::from_secs(10),
             http_client,
         })
     }
