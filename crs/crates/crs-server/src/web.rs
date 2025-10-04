@@ -28,6 +28,15 @@ pub async fn dashboard(
     let registry = &ctx.context().registry;
     let clients = registry.list_clients();
 
+    // Get server information
+    let server_hostname = hostname::get()
+        .ok()
+        .and_then(|h| h.into_string().ok())
+        .unwrap_or_else(|| "unknown".to_string());
+    let server_os = std::env::consts::OS;
+    let server_version = env!("CARGO_PKG_VERSION");
+    let server_bind_addr = ctx.server.local_addr;
+
     let mut rows = String::new();
     for client in &clients {
         let status_color = match client.status {
@@ -42,14 +51,6 @@ pub async fn dashboard(
             ClientStatus::Offline => "offline",
         };
 
-        let tags = client
-            .info
-            .tags
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join(", ");
-
         rows.push_str(&format!(
             r#"
         <tr>
@@ -57,20 +58,16 @@ pub async fn dashboard(
             <td>{}</td>
             <td>{}</td>
             <td>{}</td>
-            <td>{}</td>
             <td style="color: {}; font-weight: bold;">{}</td>
             <td>{}</td>
-            <td>{}</td>
         </tr>"#,
-            client.client_id,
             client.info.hostname,
-            client.info.os,
             client.info.ip_address,
+            client.info.os,
             client.info.version,
             status_color,
             status_text,
             client.last_heartbeat.format("%Y-%m-%d %H:%M:%S UTC"),
-            tags
         ));
     }
 
@@ -90,11 +87,16 @@ pub async fn dashboard(
         h1 {{
             color: #333;
         }}
+        h2 {{
+            color: #555;
+            margin-top: 30px;
+        }}
         table {{
             border-collapse: collapse;
             width: 100%;
             background-color: white;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
         }}
         th, td {{
             border: 1px solid #ddd;
@@ -112,28 +114,55 @@ pub async fn dashboard(
             margin: 10px 0;
             color: #666;
         }}
+        .server-info {{
+            background-color: #e8f5e9;
+        }}
     </style>
 </head>
 <body>
     <h1>Central Registry Service</h1>
     <div class="info">
-        Total clients: {} | Page auto-refreshes every 10 seconds
+        Page auto-refreshes every 10 seconds
     </div>
+
+    <h2>Server Information</h2>
     <table>
         <tr>
-            <th>Client ID</th>
             <th>Hostname</th>
-            <th>OS</th>
             <th>IP Address</th>
+            <th>OS</th>
             <th>Version</th>
             <th>Status</th>
             <th>Last Heartbeat</th>
-            <th>Tags</th>
+        </tr>
+        <tr class="server-info">
+            <td>{}</td>
+            <td>{}</td>
+            <td>{}</td>
+            <td>{}</td>
+            <td style="color: green; font-weight: bold;">running</td>
+            <td>N/A</td>
+        </tr>
+    </table>
+
+    <h2>Registered Clients ({})</h2>
+    <table>
+        <tr>
+            <th>Hostname</th>
+            <th>IP Address</th>
+            <th>OS</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Last Heartbeat</th>
         </tr>
         {}
     </table>
 </body>
 </html>"#,
+        server_hostname,
+        server_bind_addr,
+        server_os,
+        server_version,
         clients.len(),
         rows
     );

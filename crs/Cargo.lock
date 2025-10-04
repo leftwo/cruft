@@ -345,6 +345,7 @@ dependencies = [
  "clap",
  "crs-common",
  "dropshot",
+ "hostname 0.4.1",
  "http",
  "serde",
  "serde_json",
