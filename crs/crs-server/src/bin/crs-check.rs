@@ -163,8 +163,8 @@ fn display_status(mut response: ListClientsResponse) {
     println!("Registered Clients ({}):", response.clients.len());
     println!("{}", "-".repeat(80));
     println!(
-        "{:<16} {:<15} {:<7} {:<19} {:<8} {:<14}",
-        "Hostname", "IP Address", "OS", "First Connected", "Status", "Time Connected"
+        "{:<16} {:<15} {:<7} {:<19} {:<8} {:<10}",
+        "Hostname", "IP Address", "OS", "Connected", "Status", "Connected"
     );
     println!("{}", "-".repeat(80));
 
@@ -178,7 +178,7 @@ fn display_status(mut response: ListClientsResponse) {
         let time_connected = format_duration(client);
 
         println!(
-            "{:<16} {:<15} {:<7} {:<19} {:<8} {:<14}",
+            "{:<16} {:<15} {:<7} {:<19} {:<8} {:<10}",
             hostname, ip, os, first_connected, status, time_connected
         );
     }
@@ -300,5 +300,39 @@ mod tests {
         assert_eq!(truncate_str("short", 10), "short");
         assert_eq!(truncate_str("verylongstring", 10), "verylon...");
         assert_eq!(truncate_str("exact", 5), "exact");
+    }
+
+    #[test]
+    fn test_output_width_80_characters() {
+        // Test that header line is exactly 80 characters
+        // Format: "{:<16} {:<15} {:<7} {:<19} {:<8} {:<10}"
+        // 16 + 1 + 15 + 1 + 7 + 1 + 19 + 1 + 8 + 1 + 10 = 80
+        let header = format!(
+            "{:<16} {:<15} {:<7} {:<19} {:<8} {:<10}",
+            "Hostname", "IP Address", "OS", "Connected", "Status", "Connected"
+        );
+        assert_eq!(
+            header.len(),
+            80,
+            "Header line must be exactly 80 characters, got {}",
+            header.len()
+        );
+
+        // Test that data rows are exactly 80 characters with max-length values
+        let row = format!(
+            "{:<16} {:<15} {:<7} {:<19} {:<8} {:<10}",
+            "a".repeat(16),
+            "b".repeat(15),
+            "c".repeat(7),
+            "2025-10-05 12:34:56", // 19 chars
+            "offline",              // 7 chars (fits in 8)
+            "999d 99h"              // 8 chars (fits in 10)
+        );
+        assert_eq!(
+            row.len(),
+            80,
+            "Data row must be exactly 80 characters, got {}",
+            row.len()
+        );
     }
 }
