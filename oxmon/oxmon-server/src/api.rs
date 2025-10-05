@@ -1,6 +1,7 @@
 use dropshot::{
-    ApiDescription, HttpError, HttpResponseOk, RequestContext, endpoint,
+    ApiDescription, Body, HttpError, HttpResponseOk, RequestContext, endpoint,
 };
+use http::{Response, StatusCode};
 use oxmon_common::HostStatus;
 use oxmon_core::Monitor;
 use slog::{Drain, Logger, o};
@@ -17,7 +18,7 @@ pub struct ServerContext {
     method = GET,
     path = "/api/hosts",
 }]
-#[allow(dead_code)] // Used by Dropshot macro
+#[allow(dead_code)]
 async fn get_hosts(
     ctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<Vec<HostStatus>>, HttpError> {
@@ -29,13 +30,23 @@ async fn get_hosts(
     method = GET,
     path = "/",
 }]
-#[allow(dead_code)] // Used by Dropshot macro
+#[allow(dead_code)]
 async fn get_dashboard(
     ctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<String>, HttpError> {
+) -> Result<Response<Body>, HttpError> {
     let status = ctx.context().monitor.get_status().await;
     let html = render_dashboard(&status);
-    Ok(HttpResponseOk(html))
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/html; charset=utf-8")
+        .body(html.into())
+        .map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to build response: {}",
+                e
+            ))
+        })
 }
 
 pub async fn start_server(

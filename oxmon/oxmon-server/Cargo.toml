@@ -21,3 +21,5 @@ chrono.workspace = true
 slog.workspace = true
 slog-term = "2.9"
 slog-async = "2.8"
+http.workspace = true
+hyper.workspace = true
