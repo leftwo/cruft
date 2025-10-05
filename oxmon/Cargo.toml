@@ -19,7 +19,7 @@ oxmon-db = { path = "oxmon-db" }
 oxmon-core = { path = "oxmon-core" }
 
 # External dependencies
-tokio = { version = "1.41", features = ["full"] }
+tokio = { version = "1.41", features = ["full", "tracing"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
