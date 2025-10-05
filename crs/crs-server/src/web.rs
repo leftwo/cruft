@@ -111,7 +111,6 @@ pub async fn dashboard(
             <td>{}</td>
             <td>{}</td>
             <td>{}</td>
-            <td>{}</td>
             <td style="color: {}; font-weight: bold;">{}</td>
             <td>{}</td>
             <td>{}</td>
@@ -119,7 +118,6 @@ pub async fn dashboard(
             client.info.hostname,
             client.info.ip_address,
             client.info.os,
-            client.info.version,
             status_color,
             status_text,
             client.last_heartbeat.format("%Y-%m-%d %H:%M:%S UTC"),
@@ -205,7 +203,6 @@ pub async fn dashboard(
             <th>Hostname</th>
             <th>IP Address</th>
             <th>OS</th>
-            <th>Version</th>
             <th>Status</th>
             <th>Last Heartbeat</th>
             <th>Time Connected</th>
