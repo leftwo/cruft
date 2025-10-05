@@ -82,7 +82,7 @@ async fn test_heartbeat_unknown_client() {
 }
 
 #[tokio::test]
-async fn test_client_status_online_to_stale() {
+async fn test_client_status_online_to_offline() {
     let registry = Registry::new();
     let info = create_client_info("status-test");
 
@@ -92,37 +92,16 @@ async fn test_client_status_online_to_stale() {
     let clients = registry.list_clients();
     assert_eq!(clients[0].status, ClientStatus::Online);
 
-    // Manually set heartbeat to 25 seconds ago (stale)
+    // Manually set heartbeat to 20 seconds ago (offline - >= 15s)
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(25).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(20).unwrap(),
     );
 
     // Update statuses
     registry.update_statuses();
 
-    // Client should now be stale
-    let clients = registry.list_clients();
-    assert_eq!(clients[0].status, ClientStatus::Stale);
-}
-
-#[tokio::test]
-async fn test_client_status_stale_to_offline() {
-    let registry = Registry::new();
-    let info = create_client_info("offline-test");
-
-    let client_id = registry.register(info);
-
-    // Manually set heartbeat to 40 seconds ago (offline)
-    registry.set_last_heartbeat(
-        client_id,
-        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
-    );
-
-    // Update statuses
-    registry.update_statuses();
-
-    // Client should be offline
+    // Client should now be offline
     let clients = registry.list_clients();
     assert_eq!(clients[0].status, ClientStatus::Offline);
 }
@@ -181,10 +160,10 @@ async fn test_heartbeat_returns_to_online() {
 
     let client_id = registry.register(info);
 
-    // Set client to stale
+    // Set client to offline
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(25).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(20).unwrap(),
     );
     registry.update_statuses();
 

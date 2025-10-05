@@ -122,7 +122,6 @@ fn format_duration(
 fn format_status(status: ClientStatus) -> &'static str {
     match status {
         ClientStatus::Online => "online",
-        ClientStatus::Stale => "stale",
         ClientStatus::Offline => "offline",
     }
 }
@@ -311,7 +310,6 @@ mod tests {
     #[test]
     fn test_format_status() {
         assert_eq!(format_status(ClientStatus::Online), "online");
-        assert_eq!(format_status(ClientStatus::Stale), "stale");
         assert_eq!(format_status(ClientStatus::Offline), "offline");
     }
 

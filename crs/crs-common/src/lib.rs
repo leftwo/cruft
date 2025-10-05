@@ -36,10 +36,9 @@
 //!
 //! # Client Status
 //!
-//! Clients are categorized into three states:
-//! - [`ClientStatus::Online`] - Recent heartbeat (< 20 seconds, < 2x interval)
-//! - [`ClientStatus::Stale`] - Heartbeat 20-30 seconds ago (2-3x interval)
-//! - [`ClientStatus::Offline`] - No heartbeat for 30+ seconds (> 3x interval)
+//! Clients are categorized into two states:
+//! - [`ClientStatus::Online`] - Recent heartbeat (< 15 seconds, < 1.5x interval)
+//! - [`ClientStatus::Offline`] - No heartbeat for 15+ seconds (>= 1.5x interval)
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -165,9 +164,6 @@ pub struct HeartbeatResponse {
 pub enum ClientStatus {
     /// Client is currently online (recent heartbeat)
     Online,
-
-    /// Client has not sent heartbeat recently but not yet timed out
-    Stale,
 
     /// Client has timed out (no heartbeat for extended period)
     Offline,
@@ -385,10 +381,6 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         assert_eq!(json, "\"online\"");
 
-        let status = ClientStatus::Stale;
-        let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, "\"stale\"");
-
         let status = ClientStatus::Offline;
         let json = serde_json::to_string(&status).unwrap();
         assert_eq!(json, "\"offline\"");
@@ -398,9 +390,6 @@ mod tests {
     fn test_client_status_deserialization() {
         let status: ClientStatus = serde_json::from_str("\"online\"").unwrap();
         assert_eq!(status, ClientStatus::Online);
-
-        let status: ClientStatus = serde_json::from_str("\"stale\"").unwrap();
-        assert_eq!(status, ClientStatus::Stale);
 
         let status: ClientStatus = serde_json::from_str("\"offline\"").unwrap();
         assert_eq!(status, ClientStatus::Offline);

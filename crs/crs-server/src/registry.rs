@@ -13,11 +13,9 @@ use std::sync::{Arc, RwLock};
 
 /// Thresholds for client status transitions (in seconds)
 /// Heartbeat interval is 10 seconds
-/// Stale: 2x heartbeat interval (20 seconds)
-/// Offline: 3x heartbeat interval (30 seconds)
+/// Offline: 1.5x heartbeat interval (15 seconds)
 const HEARTBEAT_INTERVAL_SECS: i64 = 10;
-const ONLINE_THRESHOLD_SECS: i64 = HEARTBEAT_INTERVAL_SECS * 2;
-const STALE_THRESHOLD_SECS: i64 = HEARTBEAT_INTERVAL_SECS * 3;
+const OFFLINE_THRESHOLD_SECS: i64 = (HEARTBEAT_INTERVAL_SECS * 3) / 2; // 15 seconds
 
 /// Registry for tracking connected clients
 ///
@@ -109,9 +107,12 @@ impl Registry {
     ///
     /// Iterates through all registered clients and updates their status
     /// based on how long ago their last heartbeat was:
-    /// - Online: last heartbeat < 60 seconds ago
-    /// - Stale: last heartbeat 60-180 seconds ago
-    /// - Offline: last heartbeat > 180 seconds ago
+    /// - Online: last heartbeat < 15 seconds ago (< 1.5x heartbeat interval)
+    /// - Offline: last heartbeat >= 15 seconds ago (>= 1.5x heartbeat interval)
+    ///
+    /// When a client transitions from Online to Offline, `registered_at` is
+    /// reset to the current time. This causes the "time connected" counter
+    /// to reset to zero when the client goes offline.
     ///
     /// This is called periodically by a background task.
     pub fn update_statuses(&self) {
@@ -121,17 +122,22 @@ impl Registry {
         for client in clients.values_mut() {
             let elapsed = now - client.last_heartbeat;
 
-            client.status = if elapsed
-                < Duration::try_seconds(ONLINE_THRESHOLD_SECS).unwrap()
+            let new_status = if elapsed
+                < Duration::try_seconds(OFFLINE_THRESHOLD_SECS).unwrap()
             {
                 ClientStatus::Online
-            } else if elapsed
-                < Duration::try_seconds(STALE_THRESHOLD_SECS).unwrap()
-            {
-                ClientStatus::Stale
             } else {
                 ClientStatus::Offline
             };
+
+            // Reset registered_at when transitioning to offline
+            if client.status == ClientStatus::Online
+                && new_status == ClientStatus::Offline
+            {
+                client.registered_at = now;
+            }
+
+            client.status = new_status;
         }
     }
 
@@ -247,39 +253,13 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_status_transitions() {
+    fn test_registry_offline_threshold() {
         let registry = Registry::new();
         let info = create_test_client_info("testhost");
 
         let client_id = registry.register(info);
 
-        // Manually set heartbeat to old time to test status updates
-        {
-            let mut clients = registry.clients.write().unwrap();
-            let client = clients.get_mut(&client_id).unwrap();
-
-            // Set to 25 seconds ago (should be Stale - between 20s and 30s)
-            client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(25).unwrap();
-        }
-
-        registry.update_statuses();
-        let clients = registry.list_clients();
-        assert_eq!(clients[0].status, ClientStatus::Stale);
-
-        // Set to 40 seconds ago (should be Offline - > 30s)
-        {
-            let mut clients = registry.clients.write().unwrap();
-            let client = clients.get_mut(&client_id).unwrap();
-            client.last_heartbeat =
-                Utc::now() - Duration::try_seconds(40).unwrap();
-        }
-
-        registry.update_statuses();
-        let clients = registry.list_clients();
-        assert_eq!(clients[0].status, ClientStatus::Offline);
-
-        // Set to 10 seconds ago (should be Online - < 20s)
+        // Set to 10 seconds ago (should be Online - < 15s)
         {
             let mut clients = registry.clients.write().unwrap();
             let client = clients.get_mut(&client_id).unwrap();
@@ -290,6 +270,44 @@ mod tests {
         registry.update_statuses();
         let clients = registry.list_clients();
         assert_eq!(clients[0].status, ClientStatus::Online);
+
+        // Set to 20 seconds ago (should be Offline - >= 15s)
+        {
+            let mut clients = registry.clients.write().unwrap();
+            let client = clients.get_mut(&client_id).unwrap();
+            client.last_heartbeat =
+                Utc::now() - Duration::try_seconds(20).unwrap();
+        }
+
+        registry.update_statuses();
+        let clients = registry.list_clients();
+        assert_eq!(clients[0].status, ClientStatus::Offline);
+    }
+
+    #[test]
+    fn test_registry_registered_at_reset_on_offline() {
+        let registry = Registry::new();
+        let info = create_test_client_info("testhost");
+
+        let client_id = registry.register(info);
+
+        // Get initial registered_at
+        let clients = registry.list_clients();
+        let initial_registered_at = clients[0].registered_at;
+
+        // Set heartbeat to old time to trigger offline
+        {
+            let mut clients = registry.clients.write().unwrap();
+            let client = clients.get_mut(&client_id).unwrap();
+            client.last_heartbeat =
+                Utc::now() - Duration::try_seconds(20).unwrap();
+        }
+
+        // Update statuses - should transition to offline and reset registered_at
+        registry.update_statuses();
+        let clients = registry.list_clients();
+        assert_eq!(clients[0].status, ClientStatus::Offline);
+        assert!(clients[0].registered_at > initial_registered_at);
     }
 
     #[test]

@@ -18,9 +18,8 @@ use http::{Response, StatusCode};
 /// Generates an HTML page displaying all registered clients in a table
 /// with their status, information, and last heartbeat time. The page
 /// auto-refreshes every 10 seconds. Status is color-coded:
-/// - Green: online (heartbeat within 60 seconds)
-/// - Orange: stale (heartbeat 60-180 seconds ago)
-/// - Red: offline (no heartbeat for 180+ seconds)
+/// - Green: online (heartbeat within 15 seconds)
+/// - Red: offline (no heartbeat for 15+ seconds)
 #[endpoint {
     method = GET,
     path = "/",
@@ -69,13 +68,11 @@ pub async fn dashboard(
     for client in &clients {
         let status_color = match client.status {
             ClientStatus::Online => "green",
-            ClientStatus::Stale => "orange",
             ClientStatus::Offline => "red",
         };
 
         let status_text = match client.status {
             ClientStatus::Online => "online",
-            ClientStatus::Stale => "stale",
             ClientStatus::Offline => "offline",
         };
 

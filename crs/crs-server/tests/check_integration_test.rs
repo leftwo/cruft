@@ -49,20 +49,10 @@ async fn test_check_reflects_status_changes() {
     let clients = registry.list_clients();
     assert_eq!(clients[0].status, ClientStatus::Online);
 
-    // Make it stale
+    // Make it offline (>= 15 seconds)
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(25).unwrap(),
-    );
-    registry.update_statuses();
-
-    let clients = registry.list_clients();
-    assert_eq!(clients[0].status, ClientStatus::Stale);
-
-    // Make it offline
-    registry.set_last_heartbeat(
-        client_id,
-        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(20).unwrap(),
     );
     registry.update_statuses();
 
@@ -74,14 +64,12 @@ async fn test_check_reflects_status_changes() {
 async fn test_check_shows_multiple_client_states() {
     let registry = Registry::new();
 
-    // Register three clients with different states
+    // Register two clients with different states
     let info1 = create_client_info("client-online");
-    let info2 = create_client_info("client-stale");
-    let info3 = create_client_info("client-offline");
+    let info2 = create_client_info("client-offline");
 
     let id1 = registry.register(info1);
     let id2 = registry.register(info2);
-    let id3 = registry.register(info3);
 
     // Set different heartbeat times
     registry.set_last_heartbeat(
@@ -90,26 +78,18 @@ async fn test_check_shows_multiple_client_states() {
     );
     registry.set_last_heartbeat(
         id2,
-        Utc::now() - chrono::Duration::try_seconds(25).unwrap(),
-    );
-    registry.set_last_heartbeat(
-        id3,
-        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(20).unwrap(),
     );
 
     registry.update_statuses();
 
     let clients = registry.list_clients();
-    assert_eq!(clients.len(), 3);
+    assert_eq!(clients.len(), 2);
 
     // Verify each client has the correct status
     let online_count = clients
         .iter()
         .filter(|c| c.status == ClientStatus::Online)
-        .count();
-    let stale_count = clients
-        .iter()
-        .filter(|c| c.status == ClientStatus::Stale)
         .count();
     let offline_count = clients
         .iter()
@@ -117,7 +97,6 @@ async fn test_check_shows_multiple_client_states() {
         .count();
 
     assert_eq!(online_count, 1);
-    assert_eq!(stale_count, 1);
     assert_eq!(offline_count, 1);
 }
 
@@ -131,7 +110,7 @@ async fn test_check_client_reconnection_updates() {
     // Make client offline
     registry.set_last_heartbeat(
         client_id,
-        Utc::now() - chrono::Duration::try_seconds(40).unwrap(),
+        Utc::now() - chrono::Duration::try_seconds(20).unwrap(),
     );
     registry.update_statuses();
 
