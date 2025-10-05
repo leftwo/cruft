@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 /// Heartbeat interval is 10 seconds
 /// Offline: 1.5x heartbeat interval (15 seconds)
 const HEARTBEAT_INTERVAL_SECS: i64 = 10;
-const OFFLINE_THRESHOLD_SECS: i64 = (HEARTBEAT_INTERVAL_SECS * 3) / 2; // 15 seconds
+const OFFLINE_THRESHOLD_SECS: i64 = (HEARTBEAT_INTERVAL_SECS * 3) / 2;
 
 /// Registry for tracking connected clients
 ///
@@ -57,7 +57,7 @@ impl Registry {
     ///
     /// If the client is already registered (based on deterministic client ID),
     /// this updates the client information but preserves the original
-    /// registration timestamp. The client is marked as online and the
+    /// first_connected timestamp. The client is marked as online and the
     /// last heartbeat time is updated to now.
     pub fn register(&self, info: ClientInfo) -> ClientId {
         let client_id = info.client_id();
@@ -65,14 +65,22 @@ impl Registry {
 
         let mut clients = self.clients.write().unwrap();
 
+        let (first_connected, registered_at) = if let Some(existing) =
+            clients.get(&client_id)
+        {
+            // Preserve first_connected, update registered_at to now for reconnection
+            (existing.first_connected, now)
+        } else {
+            // New client - both timestamps are now
+            (now, now)
+        };
+
         let registered_client = RegisteredClient {
             client_id,
             info,
             status: ClientStatus::Online,
-            registered_at: clients
-                .get(&client_id)
-                .map(|c| c.registered_at)
-                .unwrap_or(now),
+            first_connected,
+            registered_at,
             last_heartbeat: now,
         };
 
@@ -110,10 +118,6 @@ impl Registry {
     /// - Online: last heartbeat < 15 seconds ago (< 1.5x heartbeat interval)
     /// - Offline: last heartbeat >= 15 seconds ago (>= 1.5x heartbeat interval)
     ///
-    /// When a client transitions from Online to Offline, `registered_at` is
-    /// reset to the current time. This causes the "time connected" counter
-    /// to reset to zero when the client goes offline.
-    ///
     /// This is called periodically by a background task.
     pub fn update_statuses(&self) {
         let now = Utc::now();
@@ -122,22 +126,13 @@ impl Registry {
         for client in clients.values_mut() {
             let elapsed = now - client.last_heartbeat;
 
-            let new_status = if elapsed
+            client.status = if elapsed
                 < Duration::try_seconds(OFFLINE_THRESHOLD_SECS).unwrap()
             {
                 ClientStatus::Online
             } else {
                 ClientStatus::Offline
             };
-
-            // Reset registered_at when transitioning to offline
-            if client.status == ClientStatus::Online
-                && new_status == ClientStatus::Offline
-            {
-                client.registered_at = now;
-            }
-
-            client.status = new_status;
         }
     }
 
@@ -200,24 +195,25 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_re_registration_preserves_timestamp() {
+    fn test_registry_re_registration_preserves_first_connected() {
         let registry = Registry::new();
         let info = create_test_client_info("testhost");
 
         // First registration
         let client_id = registry.register(info.clone());
         let clients = registry.list_clients();
-        let first_registered_at = clients[0].registered_at;
+        let first_connected = clients[0].first_connected;
 
         // Wait a bit then re-register
         std::thread::sleep(std::time::Duration::from_millis(10));
         registry.register(info.clone());
 
-        // Verify registration timestamp is preserved
+        // Verify first_connected timestamp is preserved, but registered_at updates
         let clients = registry.list_clients();
         assert_eq!(clients.len(), 1);
         assert_eq!(clients[0].client_id, client_id);
-        assert_eq!(clients[0].registered_at, first_registered_at);
+        assert_eq!(clients[0].first_connected, first_connected);
+        assert!(clients[0].registered_at > first_connected);
     }
 
     #[test]
@@ -285,15 +281,16 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_registered_at_reset_on_offline() {
+    fn test_registry_time_connected_zero_when_offline() {
         let registry = Registry::new();
         let info = create_test_client_info("testhost");
 
         let client_id = registry.register(info);
 
-        // Get initial registered_at
+        // Client should be online with non-zero time connected
         let clients = registry.list_clients();
-        let initial_registered_at = clients[0].registered_at;
+        assert_eq!(clients[0].status, ClientStatus::Online);
+        assert!(clients[0].time_connected().num_seconds() >= 0);
 
         // Set heartbeat to old time to trigger offline
         {
@@ -303,11 +300,15 @@ mod tests {
                 Utc::now() - Duration::try_seconds(20).unwrap();
         }
 
-        // Update statuses - should transition to offline and reset registered_at
+        // Update statuses - should transition to offline with zero time connected
         registry.update_statuses();
         let clients = registry.list_clients();
         assert_eq!(clients[0].status, ClientStatus::Offline);
-        assert!(clients[0].registered_at > initial_registered_at);
+        assert_eq!(
+            clients[0].time_connected().num_seconds(),
+            0,
+            "Time connected should be exactly zero for offline clients"
+        );
     }
 
     #[test]

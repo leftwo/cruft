@@ -114,7 +114,7 @@ async fn test_client_reconnection_preserves_id() {
     // First registration
     let client_id1 = registry.register(info.clone());
     let clients = registry.list_clients();
-    let registered_at1 = clients[0].registered_at;
+    let first_connected1 = clients[0].first_connected;
 
     // Wait a bit
     sleep(Duration::from_millis(10)).await;
@@ -125,9 +125,10 @@ async fn test_client_reconnection_preserves_id() {
     // IDs should be the same
     assert_eq!(client_id1, client_id2);
 
-    // Registration time should be preserved
+    // First connected time should be preserved, but registered_at updates
     let clients = registry.list_clients();
-    assert_eq!(clients[0].registered_at, registered_at1);
+    assert_eq!(clients[0].first_connected, first_connected1);
+    assert!(clients[0].registered_at > first_connected1);
 }
 
 #[tokio::test]

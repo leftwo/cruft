@@ -77,13 +77,7 @@ pub async fn dashboard(
         };
 
         // Calculate time connected
-        // For offline clients, use last_heartbeat instead of now
-        let end_time = if client.status == ClientStatus::Offline {
-            client.last_heartbeat
-        } else {
-            chrono::Utc::now()
-        };
-        let connected_duration = end_time - client.registered_at;
+        let connected_duration = client.time_connected();
         let connected_str = if connected_duration.num_days() > 0 {
             format!(
                 "{}d {}h",

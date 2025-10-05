@@ -125,19 +125,20 @@ async fn test_check_client_reconnection_updates() {
 }
 
 #[tokio::test]
-async fn test_check_preserves_registration_time() {
+async fn test_check_preserves_first_connected_time() {
     let registry = Registry::new();
 
     let info = create_client_info("time-preservation-test");
     let _client_id = registry.register(info.clone());
 
     let clients = registry.list_clients();
-    let original_registered_at = clients[0].registered_at;
+    let original_first_connected = clients[0].first_connected;
 
     // Wait a bit and re-register
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     registry.register(info);
 
     let clients = registry.list_clients();
-    assert_eq!(clients[0].registered_at, original_registered_at);
+    assert_eq!(clients[0].first_connected, original_first_connected);
+    assert!(clients[0].registered_at > original_first_connected);
 }

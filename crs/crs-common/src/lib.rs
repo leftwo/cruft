@@ -182,13 +182,31 @@ pub struct RegisteredClient {
     /// Current status
     pub status: ClientStatus,
 
-    /// When the client first registered (RFC3339 format)
+    /// When the client first connected (never changes, RFC3339 format)
+    #[schemars(with = "String")]
+    pub first_connected: DateTime<Utc>,
+
+    /// When the client most recently connected/registered (RFC3339 format)
     #[schemars(with = "String")]
     pub registered_at: DateTime<Utc>,
 
     /// When the last heartbeat was received (RFC3339 format)
     #[schemars(with = "String")]
     pub last_heartbeat: DateTime<Utc>,
+}
+
+impl RegisteredClient {
+    /// Calculate time connected
+    ///
+    /// Returns the duration the client has been connected:
+    /// - For online clients: time from registered_at to now
+    /// - For offline clients: always zero (Duration::zero())
+    pub fn time_connected(&self) -> chrono::Duration {
+        match self.status {
+            ClientStatus::Online => Utc::now() - self.registered_at,
+            ClientStatus::Offline => chrono::Duration::zero(),
+        }
+    }
 }
 
 /// Response listing all registered clients
