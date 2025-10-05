@@ -163,8 +163,8 @@ fn display_status(mut response: ListClientsResponse) {
     println!("Registered Clients ({}):", response.clients.len());
     println!("{}", "-".repeat(80));
     println!(
-        "{:<16} {:<15} {:<7} {:<8} {:<8} {:<14}",
-        "Hostname", "IP Address", "OS", "Version", "Status", "Time Connected"
+        "{:<16} {:<15} {:<7} {:<19} {:<8} {:<14}",
+        "Hostname", "IP Address", "OS", "First Connected", "Status", "Time Connected"
     );
     println!("{}", "-".repeat(80));
 
@@ -173,13 +173,13 @@ fn display_status(mut response: ListClientsResponse) {
         let hostname = truncate_str(&client.info.hostname, 16);
         let ip = truncate_str(&client.info.ip_address, 15);
         let os = truncate_str(&client.info.os, 7);
-        let version = truncate_str(&client.info.version, 8);
+        let first_connected = client.first_connected.format("%Y-%m-%d %H:%M:%S").to_string();
         let status = format_status(client.status);
         let time_connected = format_duration(client);
 
         println!(
-            "{:<16} {:<15} {:<7} {:<8} {:<8} {:<14}",
-            hostname, ip, os, version, status, time_connected
+            "{:<16} {:<15} {:<7} {:<19} {:<8} {:<14}",
+            hostname, ip, os, first_connected, status, time_connected
         );
     }
 
