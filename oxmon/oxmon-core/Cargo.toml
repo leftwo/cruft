@@ -1,0 +1,15 @@
+[package]
+name = "oxmon-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oxmon-common.workspace = true
+oxmon-db.workspace = true
+tokio.workspace = true
+surge-ping.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"

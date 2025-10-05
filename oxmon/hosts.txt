@@ -1,0 +1,8 @@
+# Oxmon Hosts Configuration
+# Format: hostname,ip_address
+# Lines starting with # are comments
+
+# Example hosts
+google-dns,8.8.8.8
+cloudflare-dns,1.1.1.1
+localhost,127.0.0.1

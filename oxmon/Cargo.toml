@@ -1,0 +1,45 @@
+[workspace]
+members = [
+    "oxmon-common",
+    "oxmon-db",
+    "oxmon-core",
+    "oxmon-server",
+    "oxmon-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+# Shared dependencies
+oxmon-common = { path = "oxmon-common" }
+oxmon-db = { path = "oxmon-db" }
+oxmon-core = { path = "oxmon-core" }
+
+# External dependencies
+tokio = { version = "1.41", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP
+dropshot = "0.12"
+schemars = { version = "0.8", features = ["chrono"] }
+slog = "2.8"
+reqwest = { version = "0.12", features = ["json"] }
+
+# Database
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "sqlite",
+    "chrono",
+    "migrate",
+] }
+
+# Ping
+surge-ping = "0.8"

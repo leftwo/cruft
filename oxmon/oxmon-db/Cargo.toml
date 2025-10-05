@@ -1,0 +1,13 @@
+[package]
+name = "oxmon-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oxmon-common.workspace = true
+sqlx.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

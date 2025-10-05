@@ -1,0 +1,17 @@
+[package]
+name = "oxmon-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "oxmon"
+path = "src/main.rs"
+
+[dependencies]
+oxmon-common.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true

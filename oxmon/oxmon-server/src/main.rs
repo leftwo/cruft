@@ -1,0 +1,68 @@
+use anyhow::Result;
+use clap::Parser;
+use oxmon_core::{Monitor, load_hosts_from_file};
+use oxmon_db::Database;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+mod api;
+mod web;
+
+#[derive(Parser, Debug)]
+#[command(name = "oxmon-server", about = "Oxide Network Monitoring Server")]
+struct Args {
+    /// Path to hosts file (hostname,ip_address per line)
+    #[arg(short = 'f', long, default_value = "hosts.txt")]
+    hosts_file: PathBuf,
+
+    /// Bind address for HTTP server
+    #[arg(short = 'b', long, default_value = "127.0.0.1")]
+    bind_address: String,
+
+    /// Bind port for HTTP server
+    #[arg(short = 'p', long, default_value = "8082")]
+    bind_port: u16,
+
+    /// Path to SQLite database
+    #[arg(short = 'd', long, default_value = "oxmon.db")]
+    db_path: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Load hosts from file
+    println!("Loading hosts from {}...", args.hosts_file.display());
+    let hosts = load_hosts_from_file(&args.hosts_file)?;
+    println!("Loaded {} hosts", hosts.len());
+
+    // Initialize database
+    println!("Initializing database at {}...", args.db_path);
+    let db = Arc::new(Database::new(&args.db_path).await?);
+
+    // Create monitor
+    println!("Starting monitor...");
+    let monitor = Arc::new(Monitor::new(db, hosts).await?);
+
+    // Start monitoring task in background
+    let monitor_clone = monitor.clone();
+    tokio::spawn(async move {
+        if let Err(e) = monitor_clone.start().await {
+            eprintln!("Monitor error: {}", e);
+        }
+    });
+
+    // Start HTTP server
+    let addr: SocketAddr =
+        format!("{}:{}", args.bind_address, args.bind_port).parse()?;
+
+    println!("Starting HTTP server on http://{}...", addr);
+    println!("Dashboard: http://{}/", addr);
+    println!("API: http://{}/api/hosts", addr);
+
+    api::start_server(addr, monitor).await?;
+
+    Ok(())
+}

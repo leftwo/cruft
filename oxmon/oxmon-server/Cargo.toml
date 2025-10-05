@@ -1,0 +1,23 @@
+[package]
+name = "oxmon-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "oxmon-server"
+path = "src/main.rs"
+
+[dependencies]
+oxmon-common.workspace = true
+oxmon-db.workspace = true
+oxmon-core.workspace = true
+tokio.workspace = true
+dropshot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+chrono.workspace = true
+slog.workspace = true
+slog-term = "2.9"
+slog-async = "2.8"
