@@ -1,6 +1,6 @@
 use anyhow::Result;
-use chrono::Utc;
-use oxmon_common::{EventType, HostConfig, HostStatus, Status};
+use chrono::{Duration as ChronoDuration, Utc};
+use oxmon_common::{EventType, HostConfig, HostStatus, HostTimeline, Status};
 use oxmon_db::Database;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -92,6 +92,46 @@ impl Monitor {
     pub async fn get_status(&self) -> Vec<HostStatus> {
         let map = self.status_map.read().await;
         map.values().cloned().collect()
+    }
+
+    /// Get timeline for all hosts over a time period
+    pub async fn get_timelines(
+        &self,
+        duration_hours: u32,
+        num_buckets: usize,
+    ) -> Result<Vec<HostTimeline>> {
+        let end_time = Utc::now();
+        let start_time =
+            end_time - ChronoDuration::hours(duration_hours as i64);
+        let bucket_duration_secs = (duration_hours * 3600) / num_buckets as u32;
+
+        let map = self.status_map.read().await;
+        let mut timelines = Vec::new();
+
+        for (host_id, config) in &self.hosts {
+            let buckets = self
+                .db
+                .get_host_timeline(*host_id, start_time, end_time, num_buckets)
+                .await?;
+
+            let current_status = map
+                .get(host_id)
+                .map(|s| s.status)
+                .unwrap_or(Status::Offline);
+
+            timelines.push(HostTimeline {
+                id: *host_id,
+                hostname: config.hostname.clone(),
+                ip_address: config.ip_address,
+                current_status,
+                buckets,
+                bucket_duration_secs,
+                start_time,
+                end_time,
+            });
+        }
+
+        Ok(timelines)
     }
 
     /// Start monitoring loop (pings every 10 seconds)

@@ -1,16 +1,33 @@
-use oxmon_common::{HostStatus, Status};
+use oxmon_common::{HostTimeline, Status, TimelineBucketState};
 
-pub fn render_dashboard(hosts: &[HostStatus]) -> String {
-    let mut sorted_hosts = hosts.to_vec();
-    sorted_hosts.sort_by_key(|host| host.ip_address);
-
-    let rows = sorted_hosts
+fn render_timeline_bar(buckets: &[TimelineBucketState]) -> String {
+    buckets
         .iter()
-        .map(|host| {
-            let status_class = match host.status {
+        .map(|state| {
+            let class = match state {
+                TimelineBucketState::Online => "online",
+                TimelineBucketState::Offline => "offline",
+                TimelineBucketState::NoData => "nodata",
+            };
+            format!(r#"<span class="timeline-segment {}"></span>"#, class)
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+pub fn render_dashboard(timelines: &[HostTimeline]) -> String {
+    let mut sorted_timelines = timelines.to_vec();
+    sorted_timelines.sort_by_key(|t| t.ip_address);
+
+    let rows = sorted_timelines
+        .iter()
+        .map(|timeline| {
+            let status_class = match timeline.current_status {
                 Status::Online => "online",
                 Status::Offline => "offline",
             };
+
+            let timeline_html = render_timeline_bar(&timeline.buckets);
 
             format!(
                 r#"
@@ -18,9 +35,13 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
                     <td>{}</td>
                     <td>{}</td>
                     <td class="{}"><span class="status-circle"></span></td>
+                    <td class="timeline">{}</td>
                 </tr>
                 "#,
-                host.hostname, host.ip_address, status_class,
+                timeline.hostname,
+                timeline.ip_address,
+                status_class,
+                timeline_html,
             )
         })
         .collect::<Vec<_>>()
@@ -88,6 +109,25 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
             height: 16px;
             border-radius: 50%;
         }}
+        .timeline {{
+            font-family: monospace;
+            white-space: nowrap;
+        }}
+        .timeline-segment {{
+            display: inline-block;
+            width: 10px;
+            height: 20px;
+            margin: 0 1px;
+        }}
+        .timeline-segment.online {{
+            background: #22c55e;
+        }}
+        .timeline-segment.offline {{
+            background: #ef4444;
+        }}
+        .timeline-segment.nodata {{
+            background: #9ca3af;
+        }}
         .footer {{
             margin-top: 20px;
             padding-top: 20px;
@@ -109,6 +149,7 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
                     <th>Hostname</th>
                     <th>IP Address</th>
                     <th>Status</th>
+                    <th>History (Past 2h)</th>
                 </tr>
             </thead>
             <tbody>
@@ -122,7 +163,7 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
     </div>
 </body>
 </html>"#,
-        hosts.len(),
+        timelines.len(),
         rows,
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"),
     )

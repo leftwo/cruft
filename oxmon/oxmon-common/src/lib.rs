@@ -97,6 +97,30 @@ impl From<Status> for EventType {
     }
 }
 
+/// Timeline bucket state for visualization
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TimelineBucketState {
+    Online,
+    Offline,
+    NoData, // Monitoring gap (server was down)
+}
+
+/// Timeline representation for a host
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HostTimeline {
+    pub id: i64,
+    pub hostname: String,
+    pub ip_address: IpAddr,
+    pub current_status: Status,
+    pub buckets: Vec<TimelineBucketState>,
+    pub bucket_duration_secs: u32,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

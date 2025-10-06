@@ -6,7 +6,7 @@ use dropshot::{
     ApiDescription, Body, HttpError, HttpResponseOk, RequestContext, endpoint,
 };
 use http::{Response, StatusCode};
-use oxmon_common::HostStatus;
+use oxmon_common::{HostStatus, HostTimeline};
 use oxmon_core::Monitor;
 use slog::{Drain, Logger, o};
 use std::net::SocketAddr;
@@ -29,6 +29,28 @@ async fn get_hosts(
     Ok(HttpResponseOk(status))
 }
 
+#[endpoint {
+    method = GET,
+    path = "/api/timelines",
+}]
+async fn get_timelines(
+    ctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<Vec<HostTimeline>>, HttpError> {
+    // Default to 2 hours, 20 buckets (6 minutes per bucket)
+    let timelines =
+        ctx.context()
+            .monitor
+            .get_timelines(2, 20)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failed to get timelines: {}",
+                    e
+                ))
+            })?;
+    Ok(HttpResponseOk(timelines))
+}
+
 #[allow(unused)]
 #[endpoint {
     method = GET,
@@ -37,8 +59,18 @@ async fn get_hosts(
 async fn get_dashboard(
     ctx: RequestContext<ServerContext>,
 ) -> Result<Response<Body>, HttpError> {
-    let status = ctx.context().monitor.get_status().await;
-    let html = render_dashboard(&status);
+    let timelines =
+        ctx.context()
+            .monitor
+            .get_timelines(2, 20)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failed to get timelines: {}",
+                    e
+                ))
+            })?;
+    let html = render_dashboard(&timelines);
 
     Response::builder()
         .status(StatusCode::OK)
@@ -58,6 +90,7 @@ pub async fn start_server(
 ) -> anyhow::Result<()> {
     let mut api = ApiDescription::new();
     api.register(get_hosts)?;
+    api.register(get_timelines)?;
     api.register(get_dashboard)?;
 
     let context = ServerContext { monitor };

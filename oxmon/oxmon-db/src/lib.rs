@@ -1,6 +1,8 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
-use oxmon_common::{EventType, HostConfig, HostEvent, ServerSession};
+use chrono::{DateTime, Duration, Utc};
+use oxmon_common::{
+    EventType, HostConfig, HostEvent, ServerSession, TimelineBucketState,
+};
 use sqlx::Row;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use std::net::IpAddr;
@@ -427,6 +429,179 @@ impl Database {
         }
 
         Ok(sessions)
+    }
+
+    /// Generate timeline buckets for a host over a time period
+    /// Returns a vector of bucket states representing the host's
+    /// status over time
+    pub async fn get_host_timeline(
+        &self,
+        host_id: i64,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        num_buckets: usize,
+    ) -> Result<Vec<TimelineBucketState>> {
+        let bucket_duration =
+            (end_time - start_time).num_seconds() / num_buckets as i64;
+        let bucket_duration = Duration::seconds(bucket_duration);
+
+        // Get all events for this host in the time range
+        let events = self
+            .get_host_events_in_range(host_id, start_time, end_time)
+            .await?;
+
+        // Get all server sessions that overlap with the time range
+        let sessions = self.get_sessions_in_range(start_time, end_time).await?;
+
+        let mut buckets = Vec::new();
+
+        for i in 0..num_buckets {
+            let bucket_start = start_time + bucket_duration * i as i32;
+            let bucket_end = bucket_start + bucket_duration;
+
+            let state = self.determine_bucket_state(
+                &events,
+                &sessions,
+                bucket_start,
+                bucket_end,
+            );
+
+            buckets.push(state);
+        }
+
+        Ok(buckets)
+    }
+
+    /// Get events for a host within a time range
+    async fn get_host_events_in_range(
+        &self,
+        host_id: i64,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+    ) -> Result<Vec<HostEvent>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, event_type, timestamp
+            FROM host_events
+            WHERE host_id = ? AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+            "#,
+        )
+        .bind(host_id)
+        .bind(start_time.to_rfc3339())
+        .bind(end_time.to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            let id: i64 = row.get("id");
+            let event_type_str: String = row.get("event_type");
+            let timestamp_str: String = row.get("timestamp");
+
+            let event_type = match event_type_str.as_str() {
+                "online" => EventType::Online,
+                "offline" => EventType::Offline,
+                "unknown" => EventType::Unknown,
+                _ => continue,
+            };
+
+            let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)?
+                .with_timezone(&Utc);
+
+            events.push(HostEvent {
+                id,
+                host_id,
+                event_type,
+                timestamp,
+            });
+        }
+
+        Ok(events)
+    }
+
+    /// Get server sessions that overlap with a time range
+    async fn get_sessions_in_range(
+        &self,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+    ) -> Result<Vec<ServerSession>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, started_at, stopped_at, shutdown_type
+            FROM server_sessions
+            WHERE started_at <= ? AND (stopped_at IS NULL OR stopped_at >= ?)
+            ORDER BY started_at ASC
+            "#,
+        )
+        .bind(end_time.to_rfc3339())
+        .bind(start_time.to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            let id: i64 = row.get("id");
+            let started_at_str: String = row.get("started_at");
+            let stopped_at_str: Option<String> = row.get("stopped_at");
+            let shutdown_type: Option<String> = row.get("shutdown_type");
+
+            let started_at = DateTime::parse_from_rfc3339(&started_at_str)?
+                .with_timezone(&Utc);
+
+            let stopped_at = stopped_at_str
+                .map(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map(|dt| dt.with_timezone(&Utc))
+                })
+                .transpose()?;
+
+            sessions.push(ServerSession {
+                id,
+                started_at,
+                stopped_at,
+                shutdown_type,
+            });
+        }
+
+        Ok(sessions)
+    }
+
+    /// Determine the state of a bucket based on events and sessions
+    fn determine_bucket_state(
+        &self,
+        events: &[HostEvent],
+        sessions: &[ServerSession],
+        bucket_start: DateTime<Utc>,
+        bucket_end: DateTime<Utc>,
+    ) -> TimelineBucketState {
+        // Check if server was running during this bucket
+        let server_running = sessions.iter().any(|session| {
+            let session_start = session.started_at;
+            let session_end = session.stopped_at.unwrap_or_else(Utc::now);
+
+            // Session overlaps with bucket
+            session_start < bucket_end && session_end > bucket_start
+        });
+
+        if !server_running {
+            return TimelineBucketState::NoData;
+        }
+
+        // Find the most recent event before or during the bucket
+        let relevant_event = events
+            .iter()
+            .filter(|e| e.timestamp <= bucket_end)
+            .next_back();
+
+        match relevant_event {
+            Some(event) => match event.event_type {
+                EventType::Online => TimelineBucketState::Online,
+                EventType::Offline => TimelineBucketState::Offline,
+                EventType::Unknown => TimelineBucketState::NoData,
+            },
+            None => TimelineBucketState::NoData,
+        }
     }
 }
 
