@@ -606,10 +606,10 @@ impl Database {
             .filter(|e| e.timestamp >= bucket_start && e.timestamp < bucket_end)
             .collect();
 
-        let event_before_bucket = events
-            .iter()
-            .filter(|e| e.timestamp < bucket_start)
-            .next_back();
+        // Events are in ascending order (oldest first), so we need
+        // the last event before bucket_start
+        let event_before_bucket =
+            events.iter().rev().find(|e| e.timestamp < bucket_start);
 
         // Priority 1: If ANY offline event during bucket → Offline
         if events_in_bucket

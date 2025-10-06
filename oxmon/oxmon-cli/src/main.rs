@@ -45,8 +45,7 @@ fn get_terminal_width(width_arg: Option<usize>) -> usize {
     }
 
     // Auto-detect terminal width
-    if let Some((terminal_size::Width(w), _)) = terminal_size::terminal_size()
-    {
+    if let Some((terminal_size::Width(w), _)) = terminal_size::terminal_size() {
         w as usize
     } else {
         // Fallback to 80 columns if detection fails
@@ -54,10 +53,7 @@ fn get_terminal_width(width_arg: Option<usize>) -> usize {
     }
 }
 
-async fn list_hosts(
-    server_url: &str,
-    width_arg: Option<usize>,
-) -> Result<()> {
+async fn list_hosts(server_url: &str, width_arg: Option<usize>) -> Result<()> {
     let url = format!("{}/api/timelines", server_url);
     let response = reqwest::get(&url).await?;
 
@@ -81,15 +77,8 @@ async fn list_hosts(
     const IP_WIDTH: usize = 15;
     const STATUS_WIDTH: usize = 3;
 
-    // Fixed columns take: 16 (hostname) + 1 (space) + 15 (ip) + 1 (space) + 3 (status) + 1 (space) = 37
-    const FIXED_COLUMNS: usize = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + 3;
-
-    // Calculate history width - use all remaining space
-    let history_width = if terminal_width > FIXED_COLUMNS + 20 {
-        terminal_width - FIXED_COLUMNS
-    } else {
-        20 // Minimum history width
-    };
+    // Fixed columns take: 16 (hostname) + 1 (space) + 15 (ip) + 1 (space) + 3 (status) + 2 (spaces) = 38
+    const FIXED_COLUMNS: usize = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + 4;
 
     // Print table header
     println!(
@@ -112,8 +101,9 @@ async fn list_hosts(
             &timeline.hostname
         };
 
-        // Render history with calculated width
-        let timeline_str = render_timeline(&timeline.buckets, history_width);
+        // Render history - calculate how many buckets fit
+        let available_width = terminal_width.saturating_sub(FIXED_COLUMNS);
+        let timeline_str = render_timeline(&timeline.buckets, available_width);
 
         println!(
             "{:<16} {:<15} {:<3} {}",
@@ -124,7 +114,10 @@ async fn list_hosts(
     Ok(())
 }
 
-fn render_timeline(buckets: &[TimelineBucketState], max_width: usize) -> String {
+fn render_timeline(
+    buckets: &[TimelineBucketState],
+    max_width: usize,
+) -> String {
     buckets
         .iter()
         .take(max_width)
