@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use dropshot::{
-    ApiDescription, Body, HttpError, HttpResponseOk, RequestContext, endpoint,
+    ApiDescription, Body, HttpError, HttpResponseOk, Query, RequestContext,
+    endpoint,
 };
 use http::{Response, StatusCode};
 use oxmon_common::{HostStatus, HostTimeline};
@@ -16,6 +17,26 @@ use crate::web::render_dashboard;
 
 pub struct ServerContext {
     pub monitor: Arc<Monitor>,
+}
+
+/// Query parameters for the timelines endpoint
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct TimelineQuery {
+    /// Duration in hours to look back (default: 2)
+    #[serde(default = "default_duration_hours")]
+    duration_hours: u32,
+
+    /// Number of time buckets to divide the duration into (default: 20)
+    #[serde(default = "default_num_buckets")]
+    num_buckets: usize,
+}
+
+fn default_duration_hours() -> u32 {
+    2
+}
+
+fn default_num_buckets() -> usize {
+    20
 }
 
 #[endpoint {
@@ -35,19 +56,20 @@ async fn get_hosts(
 }]
 async fn get_timelines(
     ctx: RequestContext<ServerContext>,
+    query: Query<TimelineQuery>,
 ) -> Result<HttpResponseOk<Vec<HostTimeline>>, HttpError> {
-    // Default to 2 hours, 20 buckets (6 minutes per bucket)
-    let timelines =
-        ctx.context()
-            .monitor
-            .get_timelines(2, 20)
-            .await
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failed to get timelines: {}",
-                    e
-                ))
-            })?;
+    let params = query.into_inner();
+    let timelines = ctx
+        .context()
+        .monitor
+        .get_timelines(params.duration_hours, params.num_buckets)
+        .await
+        .map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to get timelines: {}",
+                e
+            ))
+        })?;
     Ok(HttpResponseOk(timelines))
 }
 
@@ -58,18 +80,20 @@ async fn get_timelines(
 }]
 async fn get_dashboard(
     ctx: RequestContext<ServerContext>,
+    query: Query<TimelineQuery>,
 ) -> Result<Response<Body>, HttpError> {
-    let timelines =
-        ctx.context()
-            .monitor
-            .get_timelines(2, 20)
-            .await
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failed to get timelines: {}",
-                    e
-                ))
-            })?;
+    let params = query.into_inner();
+    let timelines = ctx
+        .context()
+        .monitor
+        .get_timelines(params.duration_hours, params.num_buckets)
+        .await
+        .map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to get timelines: {}",
+                e
+            ))
+        })?;
     let html = render_dashboard(&timelines);
 
     Response::builder()

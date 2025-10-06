@@ -13,6 +13,14 @@ struct Args {
     #[arg(short = 'w', long)]
     width: Option<usize>,
 
+    /// Duration in hours to look back (default: 2)
+    #[arg(short = 'd', long, default_value = "2")]
+    duration_hours: u32,
+
+    /// Number of time buckets (default: 20)
+    #[arg(short = 'b', long, default_value = "20")]
+    num_buckets: usize,
+
     /// Command to execute
     #[command(subcommand)]
     command: Option<Command>,
@@ -32,7 +40,15 @@ async fn main() -> Result<()> {
     let command = args.command.unwrap_or(Command::List);
 
     match command {
-        Command::List => list_hosts(&args.server_url, args.width).await?,
+        Command::List => {
+            list_hosts(
+                &args.server_url,
+                args.width,
+                args.duration_hours,
+                args.num_buckets,
+            )
+            .await?
+        }
     }
 
     Ok(())
@@ -53,8 +69,16 @@ fn get_terminal_width(width_arg: Option<usize>) -> usize {
     }
 }
 
-async fn list_hosts(server_url: &str, width_arg: Option<usize>) -> Result<()> {
-    let url = format!("{}/api/timelines", server_url);
+async fn list_hosts(
+    server_url: &str,
+    width_arg: Option<usize>,
+    duration_hours: u32,
+    num_buckets: usize,
+) -> Result<()> {
+    let url = format!(
+        "{}/api/timelines?duration_hours={}&num_buckets={}",
+        server_url, duration_hours, num_buckets
+    );
     let response = reqwest::get(&url).await?;
 
     if !response.status().is_success() {
@@ -77,13 +101,19 @@ async fn list_hosts(server_url: &str, width_arg: Option<usize>) -> Result<()> {
     const IP_WIDTH: usize = 15;
     const STATUS_WIDTH: usize = 3;
 
-    // Fixed columns take: 16 (hostname) + 1 (space) + 15 (ip) + 1 (space) + 3 (status) + 2 (spaces) = 38
+    // Fixed columns take: 16 (hostname) + 1 (space) + 15 (ip)
+    // + 1 (space) + 3 (status) + 2 (spaces) = 38
     const FIXED_COLUMNS: usize = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + 4;
 
     // Print table header
+    let history_label = if duration_hours == 1 {
+        format!("HISTORY (Past {}h)", duration_hours)
+    } else {
+        format!("HISTORY (Past {}h)", duration_hours)
+    };
     println!(
-        "{:<16} {:<15} {:<3} HISTORY (Past 2h)",
-        "HOSTNAME", "IP ADDRESS", "STA"
+        "{:<16} {:<15} {:<3} {}",
+        "HOSTNAME", "IP ADDRESS", "STA", history_label
     );
     println!("{}", "-".repeat(terminal_width));
 
