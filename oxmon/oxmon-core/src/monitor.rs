@@ -96,6 +96,9 @@ impl Monitor {
 
     /// Start monitoring loop (pings every 10 seconds)
     pub async fn start(self: Arc<Self>) -> Result<()> {
+        // Do an immediate first check on startup
+        self.check_all_hosts().await?;
+
         let mut interval = time::interval(Duration::from_secs(10));
 
         loop {
@@ -266,6 +269,40 @@ mod tests {
         // Verify host IDs match between runs
         assert_eq!(monitor1.hosts[0].0, monitor2.hosts[0].0);
         assert_eq!(monitor1.hosts[1].0, monitor2.hosts[1].0);
+    }
+
+    #[tokio::test]
+    async fn test_monitor_updates_status_after_ping() {
+        // Create an in-memory database
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        let db = Arc::new(db);
+
+        // Use localhost which should respond to pings
+        let host = HostConfig {
+            hostname: "localhost".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        };
+
+        // Create monitor
+        let monitor = Arc::new(Monitor::new(db.clone(), vec![host]).await.unwrap());
+
+        // Check initial status - should be offline
+        let initial_status = monitor.get_status().await;
+        assert_eq!(initial_status.len(), 1);
+        assert_eq!(initial_status[0].status, Status::Offline);
+        assert_eq!(initial_status[0].total_count, 0);
+
+        // Manually trigger one check cycle (simulating what the monitoring loop does)
+        monitor.check_all_hosts().await.unwrap();
+
+        // Now status should be updated
+        let updated_status = monitor.get_status().await;
+        assert_eq!(updated_status.len(), 1);
+
+        // Localhost should be online after ping
+        assert_eq!(updated_status[0].status, Status::Online);
+        assert_eq!(updated_status[0].total_count, 3); // 3 pings attempted
+        assert!(updated_status[0].success_count > 0); // At least some succeeded
     }
 
     #[tokio::test]
