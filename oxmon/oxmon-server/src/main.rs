@@ -5,6 +5,7 @@ use oxmon_db::Database;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::signal;
 
 mod api;
 mod web;
@@ -62,6 +63,25 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         if let Err(e) = monitor_clone.start().await {
             eprintln!("Monitor error: {}", e);
+        }
+    });
+
+    // Set up graceful shutdown handler
+    let monitor_shutdown = monitor.clone();
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                println!("\nReceived shutdown signal, closing session...");
+                if let Err(e) = monitor_shutdown.shutdown().await {
+                    eprintln!("Error during shutdown: {}", e);
+                } else {
+                    println!("Session closed cleanly");
+                }
+                std::process::exit(0);
+            }
+            Err(err) => {
+                eprintln!("Error setting up signal handler: {}", err);
+            }
         }
     });
 

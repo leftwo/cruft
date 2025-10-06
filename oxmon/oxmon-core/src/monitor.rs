@@ -14,6 +14,7 @@ pub struct Monitor {
     db: Arc<Database>,
     hosts: Vec<(i64, HostConfig)>,
     status_map: Arc<RwLock<HashMap<i64, HostStatus>>>,
+    session_id: i64,
 }
 
 impl Monitor {
@@ -45,7 +46,7 @@ impl Monitor {
         }
 
         // Create new session for this server run
-        let _session_id = db.create_session().await?;
+        let session_id = db.create_session().await?;
 
         let host_ids = if hosts.is_empty() {
             // Load hosts from database
@@ -85,6 +86,7 @@ impl Monitor {
             db,
             hosts: host_ids,
             status_map: Arc::new(RwLock::new(initial_status_map)),
+            session_id,
         })
     }
 
@@ -92,6 +94,15 @@ impl Monitor {
     pub async fn get_status(&self) -> Vec<HostStatus> {
         let map = self.status_map.read().await;
         map.values().cloned().collect()
+    }
+
+    /// Shutdown the monitor gracefully, closing the current session
+    pub async fn shutdown(&self) -> Result<()> {
+        let stopped_at = Utc::now();
+        self.db
+            .close_session(self.session_id, stopped_at, "graceful")
+            .await?;
+        Ok(())
     }
 
     /// Get timeline for all hosts over a time period
