@@ -64,12 +64,31 @@ impl Monitor {
             for host in &hosts {
                 let (id, is_new) = db.upsert_host(host).await?;
 
-                // Record appropriate initial event:
-                // - New hosts: "offline" (starting to monitor)
-                // - Existing hosts: "unknown" (server was down, state unknown)
                 if is_new {
-                    db.record_event(id, EventType::Offline).await?;
+                    // For new hosts, ping first to determine actual state
+                    let ping_result = crate::ping_host(host).await?;
+                    let is_online = ping_result.is_online();
+
+                    if is_online {
+                        // Host is online - record online event and set first_inserted
+                        db.record_event(id, EventType::Online).await?;
+                        db.set_first_inserted(id, ping_result.timestamp)
+                            .await?;
+                    } else {
+                        // Host is offline - record offline event
+                        db.record_event(id, EventType::Offline).await?;
+                    }
+
+                    // Record the ping result
+                    db.record_ping_result(
+                        id,
+                        ping_result.success_count,
+                        ping_result.total_count,
+                        ping_result.avg_latency_ms(),
+                    )
+                    .await?;
                 } else {
+                    // Existing hosts: "unknown" (server was down, state unknown)
                     db.record_event(id, EventType::Unknown).await?;
                 }
 
@@ -78,14 +97,27 @@ impl Monitor {
             host_ids
         };
 
-        // Initialize status_map with all hosts (status unknown until first ping)
+        // Initialize status_map with all hosts
+        // For new hosts that were just pinged, use the actual state
+        // For existing hosts, use the last known state or default to offline
         let mut initial_status_map = HashMap::new();
         for (host_id, host_config) in &host_ids {
+            // Get the most recent event to determine initial status
+            let last_event = db.get_last_event(*host_id).await?;
+            let initial_status_value = match last_event {
+                Some(event) => match event.event_type {
+                    EventType::Online => Status::Online,
+                    EventType::Offline => Status::Offline,
+                    EventType::Unknown => Status::Offline, // Default to offline when unknown
+                },
+                None => Status::Offline,
+            };
+
             let initial_status = HostStatus {
                 id: *host_id,
                 hostname: host_config.hostname.clone(),
                 ip_address: host_config.ip_address,
-                status: Status::Offline, // Default to offline until first ping
+                status: initial_status_value,
                 last_check: Utc::now(),
                 success_count: 0,
                 total_count: 0,
@@ -266,11 +298,11 @@ mod tests {
         // Create test hosts
         let host1 = HostConfig {
             hostname: "test-host-1".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         };
         let host2 = HostConfig {
             hostname: "test-host-2".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
         };
 
         // Create monitor with hosts
@@ -309,11 +341,11 @@ mod tests {
         // Create some test hosts
         let host1 = HostConfig {
             hostname: "test-host-1".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         };
         let host2 = HostConfig {
             hostname: "test-host-2".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
         };
 
         // First run: Create monitor with hosts from file
@@ -350,11 +382,11 @@ mod tests {
         let monitor =
             Arc::new(Monitor::new(db.clone(), vec![host]).await.unwrap());
 
-        // Check initial status - should be offline
+        // Check initial status - should be online because localhost responds to ping during initialization
         let initial_status = monitor.get_status().await;
         assert_eq!(initial_status.len(), 1);
-        assert_eq!(initial_status[0].status, Status::Offline);
-        assert_eq!(initial_status[0].total_count, 0);
+        assert_eq!(initial_status[0].status, Status::Online);
+        assert_eq!(initial_status[0].total_count, 0); // count not updated yet in status_map
 
         // Manually trigger one check cycle (simulating what the monitoring loop does)
         monitor.check_all_hosts().await.unwrap();
@@ -380,7 +412,7 @@ mod tests {
         // Create a test host
         let host = HostConfig {
             hostname: "test-host".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         };
 
         // First server session: Start server
@@ -443,7 +475,7 @@ mod tests {
 
         let host = HostConfig {
             hostname: "new-host".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 100)),
         };
 
         // First time seeing this host
@@ -468,7 +500,7 @@ mod tests {
 
         let host = HostConfig {
             hostname: "existing-host".to_string(),
-            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 101)),
         };
 
         // First session - new host
