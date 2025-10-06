@@ -17,16 +17,23 @@ pub struct Monitor {
 
 impl Monitor {
     /// Create a new monitor
+    /// If hosts is empty, loads existing hosts from database
     pub async fn new(
         db: Arc<Database>,
         hosts: Vec<HostConfig>,
     ) -> Result<Self> {
-        // Upsert all hosts into the database
-        let mut host_ids = Vec::new();
-        for host in &hosts {
-            let id = db.upsert_host(host).await?;
-            host_ids.push((id, host.clone()));
-        }
+        let host_ids = if hosts.is_empty() {
+            // Load hosts from database
+            db.get_hosts().await?
+        } else {
+            // Upsert all hosts into the database
+            let mut host_ids = Vec::new();
+            for host in &hosts {
+                let id = db.upsert_host(host).await?;
+                host_ids.push((id, host.clone()));
+            }
+            host_ids
+        };
 
         Ok(Self {
             db,
@@ -124,5 +131,46 @@ impl Monitor {
         map.insert(host_id, host_status);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxmon_common::HostConfig;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[tokio::test]
+    async fn test_monitor_loads_hosts_from_database() {
+        // Create an in-memory database
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        let db = Arc::new(db);
+
+        // Create some test hosts
+        let host1 = HostConfig {
+            hostname: "test-host-1".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host2 = HostConfig {
+            hostname: "test-host-2".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+        };
+
+        // First run: Create monitor with hosts from file
+        let hosts = vec![host1.clone(), host2.clone()];
+        let monitor1 = Monitor::new(db.clone(), hosts).await.unwrap();
+        assert_eq!(monitor1.hosts.len(), 2);
+        assert_eq!(monitor1.hosts[0].1.hostname, "test-host-1");
+        assert_eq!(monitor1.hosts[1].1.hostname, "test-host-2");
+
+        // Second run: Create monitor with no hosts (load from database)
+        let monitor2 = Monitor::new(db.clone(), Vec::new()).await.unwrap();
+        assert_eq!(monitor2.hosts.len(), 2);
+        assert_eq!(monitor2.hosts[0].1.hostname, "test-host-1");
+        assert_eq!(monitor2.hosts[1].1.hostname, "test-host-2");
+
+        // Verify host IDs match between runs
+        assert_eq!(monitor1.hosts[0].0, monitor2.hosts[0].0);
+        assert_eq!(monitor1.hosts[1].0, monitor2.hosts[1].0);
     }
 }
