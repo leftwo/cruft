@@ -39,8 +39,13 @@ async fn main() -> Result<()> {
     println!("Loaded {} hosts", hosts.len());
 
     // Initialize database
-    println!("Initializing database at {}...", args.db_path);
-    let db = Arc::new(Database::new(&args.db_path).await?);
+    let (db, is_new) = Database::new(&args.db_path).await?;
+    if is_new {
+        println!("Creating new database at {}...", args.db_path);
+    } else {
+        println!("Loading existing database from {}...", args.db_path);
+    }
+    let db = Arc::new(db);
 
     // Create monitor
     println!("Starting monitor...");

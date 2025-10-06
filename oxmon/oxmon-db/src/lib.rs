@@ -12,7 +12,12 @@ pub struct Database {
 
 impl Database {
     /// Create a new database connection
-    pub async fn new(db_path: &str) -> Result<Self> {
+    /// Returns (Database, is_new) where is_new indicates if the database
+    /// was newly created
+    pub async fn new(db_path: &str) -> Result<(Self, bool)> {
+        let db_exists =
+            std::path::Path::new(db_path).exists() && db_path != ":memory:";
+
         let options =
             SqliteConnectOptions::from_str(db_path)?.create_if_missing(true);
 
@@ -21,7 +26,7 @@ impl Database {
         let db = Self { pool };
         db.run_migrations().await?;
 
-        Ok(db)
+        Ok((db, !db_exists))
     }
 
     /// Run database migrations
@@ -265,7 +270,8 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     async fn create_test_db() -> Database {
-        Database::new(":memory:").await.unwrap()
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        db
     }
 
     #[tokio::test]
