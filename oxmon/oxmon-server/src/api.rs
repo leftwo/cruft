@@ -1,3 +1,7 @@
+// Suppress warnings for Dropshot's macro-generated phantom types
+// Figure out why RequestContext does this
+#![allow(dead_code)]
+
 use dropshot::{
     ApiDescription, Body, HttpError, HttpResponseOk, RequestContext, endpoint,
 };
@@ -18,7 +22,6 @@ pub struct ServerContext {
     method = GET,
     path = "/api/hosts",
 }]
-#[allow(dead_code)]
 async fn get_hosts(
     ctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<Vec<HostStatus>>, HttpError> {
@@ -26,11 +29,11 @@ async fn get_hosts(
     Ok(HttpResponseOk(status))
 }
 
+#[allow(unused)]
 #[endpoint {
     method = GET,
     path = "/",
 }]
-#[allow(dead_code)]
 async fn get_dashboard(
     ctx: RequestContext<ServerContext>,
 ) -> Result<Response<Body>, HttpError> {
