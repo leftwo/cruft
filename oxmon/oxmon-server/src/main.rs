@@ -13,8 +13,8 @@ mod web;
 #[command(name = "oxmon-server", about = "Oxide Network Monitoring Server")]
 struct Args {
     /// Path to hosts file (hostname,ip_address per line)
-    #[arg(short = 'f', long, default_value = "hosts.txt")]
-    hosts_file: PathBuf,
+    #[arg(short = 'f', long)]
+    hosts_file: Option<PathBuf>,
 
     /// Bind address for HTTP server
     #[arg(short = 'b', long, default_value = "127.0.0.1")]
@@ -33,10 +33,16 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Load hosts from file
-    println!("Loading hosts from {}...", args.hosts_file.display());
-    let hosts = load_hosts_from_file(&args.hosts_file)?;
-    println!("Loaded {} hosts", hosts.len());
+    // Load hosts from file if provided
+    let hosts = if let Some(hosts_file) = &args.hosts_file {
+        println!("Loading hosts from {}...", hosts_file.display());
+        let hosts = load_hosts_from_file(hosts_file)?;
+        println!("Loaded {} hosts", hosts.len());
+        hosts
+    } else {
+        println!("No hosts file provided, using existing database hosts");
+        Vec::new()
+    };
 
     // Initialize database
     let (db, is_new) = Database::new(&args.db_path).await?;
