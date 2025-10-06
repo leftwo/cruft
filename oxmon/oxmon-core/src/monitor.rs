@@ -1,5 +1,5 @@
 use anyhow::Result;
-use oxmon_common::{HostConfig, HostStatus, Status};
+use oxmon_common::{EventType, HostConfig, HostStatus, Status};
 use oxmon_db::Database;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,10 +18,34 @@ pub struct Monitor {
 impl Monitor {
     /// Create a new monitor
     /// If hosts is empty, loads existing hosts from database
+    /// Handles server restart by recording gaps in monitoring
     pub async fn new(
         db: Arc<Database>,
         hosts: Vec<HostConfig>,
     ) -> Result<Self> {
+        // Handle previous session if it exists
+        if let Some(last_session) = db.get_last_session().await? {
+            // If last session has no stopped_at, server crashed
+            if last_session.stopped_at.is_none() {
+                // Find the last ping timestamp to estimate when server stopped
+                if let Some(last_ping) = db.get_last_ping_timestamp().await? {
+                    db.close_session(last_session.id, last_ping, "crashed")
+                        .await?;
+                } else {
+                    // No pings recorded, use session start time
+                    db.close_session(
+                        last_session.id,
+                        last_session.started_at,
+                        "unknown",
+                    )
+                    .await?;
+                }
+            }
+        }
+
+        // Create new session for this server run
+        let _session_id = db.create_session().await?;
+
         let host_ids = if hosts.is_empty() {
             // Load hosts from database
             db.get_hosts().await?
@@ -34,6 +58,11 @@ impl Monitor {
             }
             host_ids
         };
+
+        // Record "unknown" event for all hosts (server was down, state unknown)
+        for (host_id, _) in &host_ids {
+            db.record_event(*host_id, EventType::Unknown).await?;
+        }
 
         Ok(Self {
             db,
@@ -94,6 +123,11 @@ impl Monitor {
         } else {
             Status::Offline
         };
+
+        // Set first_connected timestamp if host came online
+        if new_status == Status::Online {
+            db.set_first_connected(host_id, result.timestamp).await?;
+        }
 
         // Get previous status
         let prev_status = {
@@ -172,5 +206,71 @@ mod tests {
         // Verify host IDs match between runs
         assert_eq!(monitor1.hosts[0].0, monitor2.hosts[0].0);
         assert_eq!(monitor1.hosts[1].0, monitor2.hosts[1].0);
+    }
+
+    #[tokio::test]
+    async fn test_server_restart_records_gap() {
+        use oxmon_common::EventType;
+
+        // Create a database file for this test
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        let db = Arc::new(db);
+
+        // Create a test host
+        let host = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+
+        // First server session: Start server
+        let monitor1 =
+            Monitor::new(db.clone(), vec![host.clone()]).await.unwrap();
+        let host_id = monitor1.hosts[0].0;
+
+        // Verify first session was created
+        let session1 = db.get_last_session().await.unwrap().unwrap();
+        assert!(session1.stopped_at.is_none()); // Still running
+        assert_eq!(session1.id, 1);
+
+        // Verify "unknown" event was recorded for the host
+        let events = db.get_host_events(host_id).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::Unknown);
+
+        // Simulate some activity (ping result)
+        db.record_ping_result(host_id, 3, 3, Some(15.0))
+            .await
+            .unwrap();
+        db.record_event(host_id, EventType::Online).await.unwrap();
+
+        // Drop monitor1 to simulate server crash (no clean shutdown)
+        drop(monitor1);
+
+        // Second server session: Restart server
+        let monitor2 = Monitor::new(db.clone(), Vec::new()).await.unwrap();
+        assert_eq!(monitor2.hosts.len(), 1);
+
+        // Verify old session was closed with "crashed" status
+        let sessions = db.get_last_session().await.unwrap().unwrap();
+        assert_eq!(sessions.id, 2); // New session
+
+        // Check that session 1 was closed
+        let all_sessions = db.get_all_sessions().await.unwrap();
+
+        assert_eq!(all_sessions.len(), 2);
+        assert_eq!(all_sessions[0].id, 1);
+        assert_eq!(all_sessions[0].shutdown_type, Some("crashed".to_string()));
+        assert!(all_sessions[0].stopped_at.is_some());
+        assert_eq!(all_sessions[1].id, 2);
+        assert_eq!(all_sessions[1].shutdown_type, None); // Current session, still running
+        assert!(all_sessions[1].stopped_at.is_none());
+
+        // Verify "unknown" event was recorded again after restart
+        let events = db.get_host_events(host_id).await.unwrap();
+        // Should have: unknown (session 1 start), online (activity), unknown (session 2 start)
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].event_type, EventType::Unknown); // oldest
+        assert_eq!(events[1].event_type, EventType::Online);
+        assert_eq!(events[0].event_type, EventType::Unknown); // newest
     }
 }

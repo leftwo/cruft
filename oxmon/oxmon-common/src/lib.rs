@@ -3,6 +3,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
+/// Server session tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSession {
+    pub id: i64,
+    pub started_at: DateTime<Utc>,
+    pub stopped_at: Option<DateTime<Utc>>,
+    pub shutdown_type: Option<String>, // "clean", "crashed", "unknown"
+}
+
 /// Configuration for a single host to monitor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostConfig {
@@ -76,6 +85,7 @@ pub struct HostEvent {
 pub enum EventType {
     Online,
     Offline,
+    Unknown, // Server restarted, host state unknown during downtime
 }
 
 impl From<Status> for EventType {

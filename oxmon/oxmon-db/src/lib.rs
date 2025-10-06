@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use oxmon_common::{EventType, HostConfig, HostEvent};
+use oxmon_common::{EventType, HostConfig, HostEvent, ServerSession};
 use sqlx::Row;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use std::net::IpAddr;
@@ -38,7 +38,8 @@ impl Database {
                 hostname TEXT NOT NULL,
                 ip_address TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT
-                    (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                first_connected TEXT
             )
             "#,
         )
@@ -77,6 +78,20 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS server_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TEXT NOT NULL DEFAULT
+                    (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                stopped_at TEXT,
+                shutdown_type TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -108,6 +123,27 @@ impl Database {
         }
     }
 
+    /// Set first_connected timestamp for a host
+    pub async fn set_first_connected(
+        &self,
+        host_id: i64,
+        timestamp: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE hosts
+            SET first_connected = ?
+            WHERE id = ? AND first_connected IS NULL
+            "#,
+        )
+        .bind(timestamp.to_rfc3339())
+        .bind(host_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Record a host event (state transition)
     pub async fn record_event(
         &self,
@@ -117,6 +153,7 @@ impl Database {
         let event_str = match event_type {
             EventType::Online => "online",
             EventType::Offline => "offline",
+            EventType::Unknown => "unknown",
         };
 
         sqlx::query(
@@ -202,6 +239,7 @@ impl Database {
             let event_type = match event_type_str.as_str() {
                 "online" => EventType::Online,
                 "offline" => EventType::Offline,
+                "unknown" => EventType::Unknown,
                 _ => return Ok(None),
             };
 
@@ -245,6 +283,7 @@ impl Database {
             let event_type = match event_type_str.as_str() {
                 "online" => EventType::Online,
                 "offline" => EventType::Offline,
+                "unknown" => EventType::Unknown,
                 _ => continue,
             };
 
@@ -260,6 +299,134 @@ impl Database {
         }
 
         Ok(events)
+    }
+
+    /// Create a new server session
+    pub async fn create_session(&self) -> Result<i64> {
+        let result = sqlx::query("INSERT INTO server_sessions DEFAULT VALUES")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Get the most recent server session
+    pub async fn get_last_session(&self) -> Result<Option<ServerSession>> {
+        let row: Option<(i64, String, Option<String>, Option<String>)> =
+            sqlx::query_as(
+                r#"
+            SELECT id, started_at, stopped_at, shutdown_type
+            FROM server_sessions
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if let Some((id, started_at_str, stopped_at_str, shutdown_type)) = row {
+            let started_at = DateTime::parse_from_rfc3339(&started_at_str)?
+                .with_timezone(&Utc);
+
+            let stopped_at = stopped_at_str
+                .map(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map(|dt| dt.with_timezone(&Utc))
+                })
+                .transpose()?;
+
+            Ok(Some(ServerSession {
+                id,
+                started_at,
+                stopped_at,
+                shutdown_type,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Close an open server session
+    pub async fn close_session(
+        &self,
+        session_id: i64,
+        stopped_at: DateTime<Utc>,
+        shutdown_type: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE server_sessions
+            SET stopped_at = ?, shutdown_type = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(stopped_at.to_rfc3339())
+        .bind(shutdown_type)
+        .bind(session_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get the timestamp of the last ping result across all hosts
+    pub async fn get_last_ping_timestamp(
+        &self,
+    ) -> Result<Option<DateTime<Utc>>> {
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"
+            SELECT timestamp
+            FROM ping_results
+            ORDER BY timestamp DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some((timestamp_str,)) = row {
+            let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)?
+                .with_timezone(&Utc);
+            Ok(Some(timestamp))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get all server sessions (for testing)
+    pub async fn get_all_sessions(&self) -> Result<Vec<ServerSession>> {
+        let rows = sqlx::query(
+            "SELECT id, started_at, stopped_at, shutdown_type FROM server_sessions ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            let id: i64 = row.get("id");
+            let started_at_str: String = row.get("started_at");
+            let stopped_at_str: Option<String> = row.get("stopped_at");
+            let shutdown_type: Option<String> = row.get("shutdown_type");
+
+            let started_at = DateTime::parse_from_rfc3339(&started_at_str)?
+                .with_timezone(&Utc);
+
+            let stopped_at = stopped_at_str
+                .map(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map(|dt| dt.with_timezone(&Utc))
+                })
+                .transpose()?;
+
+            sessions.push(ServerSession {
+                id,
+                started_at,
+                stopped_at,
+                shutdown_type,
+            });
+        }
+
+        Ok(sessions)
     }
 }
 
