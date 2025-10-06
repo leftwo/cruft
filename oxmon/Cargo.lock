@@ -1574,6 +1574,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "terminal_size",
  "tokio",
 ]
 
@@ -2720,6 +2721,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2111ef44dae28680ae9752bb89409e7310ca33a8c621ebe7b106cf5c928b3ac0"
 dependencies = [
  "windows-sys 0.61.1",
+]
+
+[[package]]
+name = "terminal_size"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60b8cb979cb11c32ce1603f8137b22262a9d131aaa5c37b5678025f22b8becd0"
+dependencies = [
+ "rustix",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

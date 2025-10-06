@@ -45,3 +45,6 @@ sqlx = { version = "0.8", features = [
 
 # Ping
 surge-ping = "0.8"
+
+# Terminal
+terminal_size = "0.4"
