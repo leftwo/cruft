@@ -50,34 +50,19 @@ async fn list_hosts(server_url: &str) -> Result<()> {
     }
 
     // Print table header
-    println!(
-        "{:<20} {:<16} {:<10} {:<12} {:<10}",
-        "HOSTNAME", "IP ADDRESS", "STATUS", "SUCCESS", "LATENCY"
-    );
-    println!("{}", "-".repeat(72));
+    println!("{:<20} {:<16} {:<10}", "HOSTNAME", "IP ADDRESS", "STATUS");
+    println!("{}", "-".repeat(46));
 
     // Print each host
     for host in hosts {
         let status_str = match host.status {
-            Status::Online => "✓ Online",
-            Status::Offline => "✗ Offline",
+            Status::Online => "on",
+            Status::Offline => "off",
         };
 
-        let success_rate =
-            format!("{}/{}", host.success_count, host.total_count);
-
-        let latency_str = host
-            .avg_latency_ms
-            .map(|l| format!("{:.1}ms", l))
-            .unwrap_or_else(|| "-".to_string());
-
         println!(
-            "{:<20} {:<16} {:<10} {:<12} {:<10}",
-            host.hostname,
-            host.ip_address,
-            status_str,
-            success_rate,
-            latency_str
+            "{:<20} {:<16} {:<10}",
+            host.hostname, host.ip_address, status_str
         );
     }
 

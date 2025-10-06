@@ -4,42 +4,20 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
     let rows = hosts
         .iter()
         .map(|host| {
-            let status_icon = match host.status {
-                Status::Online => "✓",
-                Status::Offline => "✗",
-            };
-
             let status_class = match host.status {
                 Status::Online => "online",
                 Status::Offline => "offline",
             };
-
-            let success_rate =
-                (host.success_count as f64 / host.total_count as f64) * 100.0;
-
-            let status_name = format!("{:?}", host.status);
 
             format!(
                 r#"
                 <tr>
                     <td>{}</td>
                     <td>{}</td>
-                    <td class="{}"><span class="status-icon">{}</span>
-                        {}</td>
-                    <td>{:.0}% ({}/{})</td>
-                    <td>{}</td>
+                    <td class="{}"><span class="status-circle"></span></td>
                 </tr>
                 "#,
-                host.hostname,
-                host.ip_address,
-                status_class,
-                status_icon,
-                status_name,
-                success_rate,
-                host.success_count,
-                host.total_count,
-                host.avg_latency_ms
-                    .map_or("-".to_string(), |l| format!("{:.1}ms", l)),
+                host.hostname, host.ip_address, status_class,
             )
         })
         .collect::<Vec<_>>()
@@ -95,17 +73,17 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
         tr:hover {{
             background: #f9f9f9;
         }}
-        .online {{
-            color: #22c55e;
-            font-weight: 600;
+        .online .status-circle {{
+            background: #22c55e;
         }}
-        .offline {{
-            color: #ef4444;
-            font-weight: 600;
+        .offline .status-circle {{
+            background: #ef4444;
         }}
-        .status-icon {{
-            font-size: 18px;
-            margin-right: 5px;
+        .status-circle {{
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
         }}
         .footer {{
             margin-top: 20px;
@@ -128,8 +106,6 @@ pub fn render_dashboard(hosts: &[HostStatus]) -> String {
                     <th>Hostname</th>
                     <th>IP Address</th>
                     <th>Status</th>
-                    <th>Success Rate</th>
-                    <th>Avg Latency</th>
                 </tr>
             </thead>
             <tbody>
