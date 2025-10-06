@@ -98,7 +98,12 @@ impl Database {
     }
 
     /// Insert or update a host
-    pub async fn upsert_host(&self, config: &HostConfig) -> Result<i64> {
+    /// Returns (host_id, is_new) where is_new indicates if the host was
+    /// newly created
+    pub async fn upsert_host(
+        &self,
+        config: &HostConfig,
+    ) -> Result<(i64, bool)> {
         let ip_str = config.ip_address.to_string();
 
         // Check if host exists
@@ -111,7 +116,7 @@ impl Database {
         .await?;
 
         if let Some((id,)) = existing {
-            Ok(id)
+            Ok((id, false)) // Existing host
         } else {
             let result = sqlx::query(
                 "INSERT INTO hosts (hostname, ip_address) VALUES (?, ?)",
@@ -121,7 +126,7 @@ impl Database {
             .execute(&self.pool)
             .await?;
 
-            Ok(result.last_insert_rowid())
+            Ok((result.last_insert_rowid(), true)) // New host
         }
     }
 
@@ -683,8 +688,9 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
 
-        let id = db.upsert_host(&config).await.unwrap();
+        let (id, is_new) = db.upsert_host(&config).await.unwrap();
         assert_eq!(id, 1);
+        assert!(is_new, "Should indicate host is new");
 
         // Verify host was inserted
         let hosts = db.get_hosts().await.unwrap();
@@ -701,11 +707,13 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
 
-        let id1 = db.upsert_host(&config).await.unwrap();
-        let id2 = db.upsert_host(&config).await.unwrap();
+        let (id1, is_new1) = db.upsert_host(&config).await.unwrap();
+        let (id2, is_new2) = db.upsert_host(&config).await.unwrap();
 
         // Should return same ID
         assert_eq!(id1, id2);
+        assert!(is_new1, "First insert should be new");
+        assert!(!is_new2, "Second insert should not be new");
 
         // Should only have one host
         let hosts = db.get_hosts().await.unwrap();
@@ -721,7 +729,7 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
 
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Record online event
         db.record_event(host_id, EventType::Online).await.unwrap();
@@ -745,7 +753,7 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
 
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Record ping result
         db.record_ping_result(host_id, 3, 3, Some(15.5))
@@ -771,7 +779,7 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
 
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Record events
         db.record_event(host_id, EventType::Online).await.unwrap();
@@ -792,7 +800,7 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
 
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // No events recorded
         let last_event = db.get_last_event(host_id).await.unwrap();
@@ -813,8 +821,8 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
         };
 
-        db.upsert_host(&config1).await.unwrap();
-        db.upsert_host(&config2).await.unwrap();
+        let _ = db.upsert_host(&config1).await.unwrap();
+        let _ = db.upsert_host(&config2).await.unwrap();
 
         let hosts = db.get_hosts().await.unwrap();
         assert_eq!(hosts.len(), 2);
@@ -833,7 +841,7 @@ mod tests {
             hostname: "test-host".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Create a session
         db.create_session().await.unwrap();
@@ -908,7 +916,7 @@ mod tests {
             hostname: "test-host".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Create a session that ends before bucket
         let session_start = Utc::now();
@@ -964,7 +972,7 @@ mod tests {
             hostname: "test-host".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Create a session
         db.create_session().await.unwrap();
@@ -1017,7 +1025,7 @@ mod tests {
             hostname: "test-host".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Create a session
         db.create_session().await.unwrap();
@@ -1065,7 +1073,7 @@ mod tests {
             hostname: "test-host".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Create a session
         db.create_session().await.unwrap();
@@ -1113,7 +1121,7 @@ mod tests {
             hostname: "test-host".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
         };
-        let host_id = db.upsert_host(&config).await.unwrap();
+        let (host_id, _) = db.upsert_host(&config).await.unwrap();
 
         // Create a session
         db.create_session().await.unwrap();

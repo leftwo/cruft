@@ -49,22 +49,34 @@ impl Monitor {
         let session_id = db.create_session().await?;
 
         let host_ids = if hosts.is_empty() {
-            // Load hosts from database
-            db.get_hosts().await?
+            // Load hosts from database - these are existing hosts
+            let existing_hosts = db.get_hosts().await?;
+
+            // Record "unknown" event for existing hosts (server was down)
+            for (host_id, _) in &existing_hosts {
+                db.record_event(*host_id, EventType::Unknown).await?;
+            }
+
+            existing_hosts
         } else {
             // Upsert all hosts into the database
             let mut host_ids = Vec::new();
             for host in &hosts {
-                let id = db.upsert_host(host).await?;
+                let (id, is_new) = db.upsert_host(host).await?;
+
+                // Record appropriate initial event:
+                // - New hosts: "offline" (starting to monitor)
+                // - Existing hosts: "unknown" (server was down, state unknown)
+                if is_new {
+                    db.record_event(id, EventType::Offline).await?;
+                } else {
+                    db.record_event(id, EventType::Unknown).await?;
+                }
+
                 host_ids.push((id, host.clone()));
             }
             host_ids
         };
-
-        // Record "unknown" event for all hosts (server was down, state unknown)
-        for (host_id, _) in &host_ids {
-            db.record_event(*host_id, EventType::Unknown).await?;
-        }
 
         // Initialize status_map with all hosts (status unknown until first ping)
         let mut initial_status_map = HashMap::new();
@@ -381,10 +393,10 @@ mod tests {
         assert!(session1.stopped_at.is_none()); // Still running
         assert_eq!(session1.id, 1);
 
-        // Verify "unknown" event was recorded for the host
+        // Verify "offline" event was recorded for new host
         let events = db.get_host_events(host_id).await.unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type, EventType::Unknown);
+        assert_eq!(events[0].event_type, EventType::Offline);
 
         // Simulate some activity (ping result)
         db.record_ping_result(host_id, 3, 3, Some(15.0))
@@ -416,10 +428,71 @@ mod tests {
 
         // Verify "unknown" event was recorded again after restart
         let events = db.get_host_events(host_id).await.unwrap();
-        // Should have: unknown (session 1 start), online (activity), unknown (session 2 start)
+        // Should have: offline (session 1 start, new host), online (activity), unknown (session 2 start)
         assert_eq!(events.len(), 3);
-        assert_eq!(events[2].event_type, EventType::Unknown); // oldest
+        assert_eq!(events[2].event_type, EventType::Offline); // oldest - new host
         assert_eq!(events[1].event_type, EventType::Online);
-        assert_eq!(events[0].event_type, EventType::Unknown); // newest
+        assert_eq!(events[0].event_type, EventType::Unknown); // newest - restart
+    }
+
+    #[tokio::test]
+    async fn test_new_host_gets_offline_event() {
+        // New hosts should get an "offline" event, not "unknown"
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        let db = Arc::new(db);
+
+        let host = HostConfig {
+            hostname: "new-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
+        };
+
+        // First time seeing this host
+        let monitor = Monitor::new(db.clone(), vec![host]).await.unwrap();
+        let host_id = monitor.hosts[0].0;
+
+        // Should have exactly one event: offline
+        let events = db.get_host_events(host_id).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_type,
+            EventType::Offline,
+            "New host should start with offline event"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_existing_host_gets_unknown_event_on_restart() {
+        // Existing hosts should get "unknown" event on server restart
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        let db = Arc::new(db);
+
+        let host = HostConfig {
+            hostname: "existing-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)),
+        };
+
+        // First session - new host
+        let monitor1 =
+            Monitor::new(db.clone(), vec![host.clone()]).await.unwrap();
+        let host_id = monitor1.hosts[0].0;
+
+        // Simulate some activity
+        db.record_event(host_id, EventType::Online).await.unwrap();
+
+        drop(monitor1);
+
+        // Second session - existing host
+        let _monitor2 = Monitor::new(db.clone(), vec![host]).await.unwrap();
+
+        // Should have: offline (initial), online (activity), unknown (restart)
+        let events = db.get_host_events(host_id).await.unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].event_type, EventType::Offline); // initial
+        assert_eq!(events[1].event_type, EventType::Online); // activity
+        assert_eq!(
+            events[0].event_type,
+            EventType::Unknown,
+            "Existing host should get unknown event on restart"
+        );
     }
 }
