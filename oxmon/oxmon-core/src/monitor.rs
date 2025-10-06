@@ -207,9 +207,9 @@ impl Monitor {
             Status::Offline
         };
 
-        // Set first_connected timestamp if host came online
+        // Set first_inserted timestamp if host came online
         if new_status == Status::Online {
-            db.set_first_connected(host_id, result.timestamp).await?;
+            db.set_first_inserted(host_id, result.timestamp).await?;
         }
 
         // Get previous status

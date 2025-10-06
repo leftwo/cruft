@@ -80,12 +80,13 @@ async fn list_hosts(
     const HOSTNAME_WIDTH: usize = 16;
     const IP_WIDTH: usize = 15;
     const STATUS_WIDTH: usize = 3;
-    const SPACING: usize = 3; // spaces between columns
 
-    // Calculate history width
-    let fixed_width = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + SPACING;
-    let history_width = if terminal_width > fixed_width + 20 {
-        terminal_width - fixed_width - 20 // Leave room for "HISTORY (Past 2h)"
+    // Fixed columns take: 16 (hostname) + 1 (space) + 15 (ip) + 1 (space) + 3 (status) + 1 (space) = 37
+    const FIXED_COLUMNS: usize = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + 3;
+
+    // Calculate history width - use all remaining space
+    let history_width = if terminal_width > FIXED_COLUMNS + 20 {
+        terminal_width - FIXED_COLUMNS
     } else {
         20 // Minimum history width
     };

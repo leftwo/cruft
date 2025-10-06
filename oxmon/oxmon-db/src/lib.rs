@@ -41,7 +41,7 @@ impl Database {
                 ip_address TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT
                     (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                first_connected TEXT
+                first_inserted TEXT
             )
             "#,
         )
@@ -130,8 +130,8 @@ impl Database {
         }
     }
 
-    /// Set first_connected timestamp for a host
-    pub async fn set_first_connected(
+    /// Set first_inserted timestamp for a host
+    pub async fn set_first_inserted(
         &self,
         host_id: i64,
         timestamp: DateTime<Utc>,
@@ -139,8 +139,8 @@ impl Database {
         sqlx::query(
             r#"
             UPDATE hosts
-            SET first_connected = ?
-            WHERE id = ? AND first_connected IS NULL
+            SET first_inserted = ?
+            WHERE id = ? AND first_inserted IS NULL
             "#,
         )
         .bind(timestamp.to_rfc3339())
