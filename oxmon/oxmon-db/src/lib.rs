@@ -274,7 +274,7 @@ impl Database {
             SELECT id, event_type, timestamp
             FROM host_events
             WHERE host_id = ?
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, id DESC
             "#,
         )
         .bind(host_id)
