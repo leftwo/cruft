@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Utc;
 use oxmon_common::{EventType, HostConfig, HostStatus, Status};
 use oxmon_db::Database;
 use std::collections::HashMap;
@@ -64,10 +65,26 @@ impl Monitor {
             db.record_event(*host_id, EventType::Unknown).await?;
         }
 
+        // Initialize status_map with all hosts (status unknown until first ping)
+        let mut initial_status_map = HashMap::new();
+        for (host_id, host_config) in &host_ids {
+            let initial_status = HostStatus {
+                id: *host_id,
+                hostname: host_config.hostname.clone(),
+                ip_address: host_config.ip_address,
+                status: Status::Offline, // Default to offline until first ping
+                last_check: Utc::now(),
+                success_count: 0,
+                total_count: 0,
+                avg_latency_ms: None,
+            };
+            initial_status_map.insert(*host_id, initial_status);
+        }
+
         Ok(Self {
             db,
             hosts: host_ids,
-            status_map: Arc::new(RwLock::new(HashMap::new())),
+            status_map: Arc::new(RwLock::new(initial_status_map)),
         })
     }
 
@@ -173,6 +190,49 @@ mod tests {
     use super::*;
     use oxmon_common::HostConfig;
     use std::net::{IpAddr, Ipv4Addr};
+
+    #[tokio::test]
+    async fn test_hosts_visible_immediately_on_startup() {
+        // Create an in-memory database
+        let (db, _) = Database::new(":memory:").await.unwrap();
+        let db = Arc::new(db);
+
+        // Create test hosts
+        let host1 = HostConfig {
+            hostname: "test-host-1".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host2 = HostConfig {
+            hostname: "test-host-2".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+        };
+
+        // Create monitor with hosts
+        let monitor =
+            Monitor::new(db.clone(), vec![host1.clone(), host2.clone()])
+                .await
+                .unwrap();
+
+        // IMMEDIATELY get status without waiting for any pings
+        let status = monitor.get_status().await;
+
+        // Should have 2 hosts visible right away
+        assert_eq!(status.len(), 2);
+
+        // Verify host details are present
+        let hostnames: Vec<_> =
+            status.iter().map(|h| h.hostname.as_str()).collect();
+        assert!(hostnames.contains(&"test-host-1"));
+        assert!(hostnames.contains(&"test-host-2"));
+
+        // All hosts should have initial status (offline until first ping)
+        for host in &status {
+            assert_eq!(host.status, Status::Offline);
+            assert_eq!(host.success_count, 0);
+            assert_eq!(host.total_count, 0);
+            assert_eq!(host.avg_latency_ms, None);
+        }
+    }
 
     #[tokio::test]
     async fn test_monitor_loads_hosts_from_database() {
