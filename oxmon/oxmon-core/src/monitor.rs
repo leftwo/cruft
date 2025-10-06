@@ -284,7 +284,8 @@ mod tests {
         };
 
         // Create monitor
-        let monitor = Arc::new(Monitor::new(db.clone(), vec![host]).await.unwrap());
+        let monitor =
+            Arc::new(Monitor::new(db.clone(), vec![host]).await.unwrap());
 
         // Check initial status - should be offline
         let initial_status = monitor.get_status().await;

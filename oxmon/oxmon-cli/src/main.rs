@@ -42,12 +42,15 @@ async fn list_hosts(server_url: &str) -> Result<()> {
         anyhow::bail!("Server returned error: {}", response.status());
     }
 
-    let hosts: Vec<HostStatus> = response.json().await?;
+    let mut hosts: Vec<HostStatus> = response.json().await?;
 
     if hosts.is_empty() {
         println!("No hosts configured");
         return Ok(());
     }
+
+    // Sort by IP address
+    hosts.sort_by_key(|host| host.ip_address);
 
     // Print table header
     println!("{:<20} {:<16} {:<10}", "HOSTNAME", "IP ADDRESS", "STATUS");

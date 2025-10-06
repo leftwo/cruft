@@ -1,7 +1,10 @@
 use oxmon_common::{HostStatus, Status};
 
 pub fn render_dashboard(hosts: &[HostStatus]) -> String {
-    let rows = hosts
+    let mut sorted_hosts = hosts.to_vec();
+    sorted_hosts.sort_by_key(|host| host.ip_address);
+
+    let rows = sorted_hosts
         .iter()
         .map(|host| {
             let status_class = match host.status {
