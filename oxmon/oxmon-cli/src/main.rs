@@ -106,11 +106,7 @@ async fn list_hosts(
     const FIXED_COLUMNS: usize = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + 4;
 
     // Print table header
-    let history_label = if duration_hours == 1 {
-        format!("HISTORY (Past {}h)", duration_hours)
-    } else {
-        format!("HISTORY (Past {}h)", duration_hours)
-    };
+    let history_label = format!("HISTORY (Past {}h)", duration_hours);
     println!(
         "{:<16} {:<15} {:<3} {}",
         "HOSTNAME", "IP ADDRESS", "STA", history_label

@@ -1625,6 +1625,7 @@ dependencies = [
  "oxmon-common",
  "oxmon-core",
  "oxmon-db",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
