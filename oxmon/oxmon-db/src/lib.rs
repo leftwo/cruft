@@ -568,6 +568,10 @@ impl Database {
     }
 
     /// Determine the state of a bucket based on events and sessions
+    /// Priority order:
+    /// 1. Offline - if ANY offline event occurs during bucket
+    /// 2. NoData - if server not running or no valid data
+    /// 3. Online - if only online events during bucket
     fn determine_bucket_state(
         &self,
         events: &[HostEvent],
@@ -588,13 +592,47 @@ impl Database {
             return TimelineBucketState::NoData;
         }
 
-        // Find the most recent event before or during the bucket
-        let relevant_event = events
+        // Get all events that are relevant to this bucket:
+        // 1. Events that occur within the bucket
+        // 2. The most recent event before the bucket starts
+        //    (represents the state at bucket start)
+        let events_in_bucket: Vec<_> = events
             .iter()
-            .filter(|e| e.timestamp <= bucket_end)
+            .filter(|e| e.timestamp >= bucket_start && e.timestamp < bucket_end)
+            .collect();
+
+        let event_before_bucket = events
+            .iter()
+            .filter(|e| e.timestamp < bucket_start)
             .next_back();
 
-        match relevant_event {
+        // Priority 1: If ANY offline event during bucket → Offline
+        if events_in_bucket
+            .iter()
+            .any(|e| e.event_type == EventType::Offline)
+        {
+            return TimelineBucketState::Offline;
+        }
+
+        // Priority 2: Check if we have unknown/no-data state
+        // If there's an unknown event in the bucket
+        if events_in_bucket
+            .iter()
+            .any(|e| e.event_type == EventType::Unknown)
+        {
+            return TimelineBucketState::NoData;
+        }
+
+        // If there's an online event in the bucket, host was online
+        if events_in_bucket
+            .iter()
+            .any(|e| e.event_type == EventType::Online)
+        {
+            return TimelineBucketState::Online;
+        }
+
+        // No events in bucket, check state before bucket
+        match event_before_bucket {
             Some(event) => match event.event_type {
                 EventType::Online => TimelineBucketState::Online,
                 EventType::Offline => TimelineBucketState::Offline,
@@ -782,5 +820,346 @@ mod tests {
         assert_eq!(hosts.len(), 2);
         assert_eq!(hosts[0].1.hostname, "host1");
         assert_eq!(hosts[1].1.hostname, "host2");
+    }
+
+    // Timeline bucket state priority tests
+
+    #[tokio::test]
+    async fn test_bucket_priority_offline_beats_online() {
+        // If a host is offline at any point during a bucket, show offline
+        let db = create_test_db().await;
+
+        let config = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host_id = db.upsert_host(&config).await.unwrap();
+
+        // Create a session
+        db.create_session().await.unwrap();
+
+        // Bucket from T+0 to T+10 minutes
+        let bucket_start = Utc::now();
+        let bucket_end = bucket_start + Duration::minutes(10);
+
+        // Events: online at T+2, offline at T+5, online at T+8
+        let t2 = bucket_start + Duration::minutes(2);
+        let t5 = bucket_start + Duration::minutes(5);
+        let t8 = bucket_start + Duration::minutes(8);
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("online")
+        .bind(t2.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("offline")
+        .bind(t5.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("online")
+        .bind(t8.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        // Get session
+        let session = db.get_last_session().await.unwrap().unwrap();
+        let sessions = vec![session];
+
+        // Get events
+        let events = db.get_host_events(host_id).await.unwrap();
+
+        // Determine state - should be Offline (offline event at T+5)
+        let state = db.determine_bucket_state(
+            &events,
+            &sessions,
+            bucket_start,
+            bucket_end,
+        );
+
+        assert_eq!(
+            state,
+            oxmon_common::TimelineBucketState::Offline,
+            "Bucket should be Offline when any offline event occurs during window"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bucket_priority_nodata_beats_online() {
+        // If server not running during bucket, show NoData even if previous state was online
+        let db = create_test_db().await;
+
+        let config = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host_id = db.upsert_host(&config).await.unwrap();
+
+        // Create a session that ends before bucket
+        let session_start = Utc::now();
+        let session_end = session_start + Duration::minutes(5);
+
+        let session_id = db.create_session().await.unwrap();
+        db.close_session(session_id, session_end, "test")
+            .await
+            .unwrap();
+
+        // Bucket from T+10 to T+20 (after session ended)
+        let bucket_start = session_start + Duration::minutes(10);
+        let bucket_end = bucket_start + Duration::minutes(10);
+
+        // Event: online at T+2 (during session, before bucket)
+        let t2 = session_start + Duration::minutes(2);
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("online")
+        .bind(t2.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        // Get session
+        let sessions = db.get_all_sessions().await.unwrap();
+        let events = db.get_host_events(host_id).await.unwrap();
+
+        // Determine state - should be NoData (server not running during bucket)
+        let state = db.determine_bucket_state(
+            &events,
+            &sessions,
+            bucket_start,
+            bucket_end,
+        );
+
+        assert_eq!(
+            state,
+            oxmon_common::TimelineBucketState::NoData,
+            "Bucket should be NoData when server not running during window"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bucket_all_online_shows_online() {
+        // If only online events during bucket, show Online
+        let db = create_test_db().await;
+
+        let config = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host_id = db.upsert_host(&config).await.unwrap();
+
+        // Create a session
+        db.create_session().await.unwrap();
+
+        // Bucket from T+0 to T+10 minutes
+        let bucket_start = Utc::now();
+        let bucket_end = bucket_start + Duration::minutes(10);
+
+        // Events: online at T+2, online at T+5, online at T+8
+        let t2 = bucket_start + Duration::minutes(2);
+        let t5 = bucket_start + Duration::minutes(5);
+        let t8 = bucket_start + Duration::minutes(8);
+
+        for timestamp in [t2, t5, t8] {
+            sqlx::query(
+                "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+            )
+            .bind(host_id)
+            .bind("online")
+            .bind(timestamp.to_rfc3339())
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        let session = db.get_last_session().await.unwrap().unwrap();
+        let sessions = vec![session];
+        let events = db.get_host_events(host_id).await.unwrap();
+
+        let state = db.determine_bucket_state(
+            &events,
+            &sessions,
+            bucket_start,
+            bucket_end,
+        );
+
+        assert_eq!(
+            state,
+            oxmon_common::TimelineBucketState::Online,
+            "Bucket should be Online when only online events occur during window"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bucket_inherits_state_from_before() {
+        // If no events during bucket, inherit state from before bucket
+        let db = create_test_db().await;
+
+        let config = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host_id = db.upsert_host(&config).await.unwrap();
+
+        // Create a session
+        db.create_session().await.unwrap();
+
+        let bucket_start = Utc::now();
+        let bucket_end = bucket_start + Duration::minutes(10);
+
+        // Event: offline BEFORE bucket starts
+        let t_before = bucket_start - Duration::minutes(5);
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("offline")
+        .bind(t_before.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let session = db.get_last_session().await.unwrap().unwrap();
+        let sessions = vec![session];
+        let events = db.get_host_events(host_id).await.unwrap();
+
+        let state = db.determine_bucket_state(
+            &events,
+            &sessions,
+            bucket_start,
+            bucket_end,
+        );
+
+        assert_eq!(
+            state,
+            oxmon_common::TimelineBucketState::Offline,
+            "Bucket should inherit Offline state from event before bucket"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bucket_unknown_event_shows_nodata() {
+        // If unknown event during bucket, show NoData
+        let db = create_test_db().await;
+
+        let config = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host_id = db.upsert_host(&config).await.unwrap();
+
+        // Create a session
+        db.create_session().await.unwrap();
+
+        let bucket_start = Utc::now();
+        let bucket_end = bucket_start + Duration::minutes(10);
+
+        // Events: unknown at T+5 (server restart during bucket)
+        let t5 = bucket_start + Duration::minutes(5);
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("unknown")
+        .bind(t5.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let session = db.get_last_session().await.unwrap().unwrap();
+        let sessions = vec![session];
+        let events = db.get_host_events(host_id).await.unwrap();
+
+        let state = db.determine_bucket_state(
+            &events,
+            &sessions,
+            bucket_start,
+            bucket_end,
+        );
+
+        assert_eq!(
+            state,
+            oxmon_common::TimelineBucketState::NoData,
+            "Bucket should be NoData when unknown event occurs during window"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bucket_offline_beats_unknown() {
+        // Offline priority beats unknown/nodata
+        let db = create_test_db().await;
+
+        let config = HostConfig {
+            hostname: "test-host".to_string(),
+            ip_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+        };
+        let host_id = db.upsert_host(&config).await.unwrap();
+
+        // Create a session
+        db.create_session().await.unwrap();
+
+        let bucket_start = Utc::now();
+        let bucket_end = bucket_start + Duration::minutes(10);
+
+        // Events: offline at T+2, unknown at T+5
+        let t2 = bucket_start + Duration::minutes(2);
+        let t5 = bucket_start + Duration::minutes(5);
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("offline")
+        .bind(t2.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO host_events (host_id, event_type, timestamp) VALUES (?, ?, ?)",
+        )
+        .bind(host_id)
+        .bind("unknown")
+        .bind(t5.to_rfc3339())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let session = db.get_last_session().await.unwrap().unwrap();
+        let sessions = vec![session];
+        let events = db.get_host_events(host_id).await.unwrap();
+
+        let state = db.determine_bucket_state(
+            &events,
+            &sessions,
+            bucket_start,
+            bucket_end,
+        );
+
+        assert_eq!(
+            state,
+            oxmon_common::TimelineBucketState::Offline,
+            "Bucket should be Offline even with unknown event (offline has priority)"
+        );
     }
 }
