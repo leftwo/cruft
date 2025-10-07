@@ -408,13 +408,13 @@ impl Database {
     }
 
     /// Get timeline showing last N ping results for a host
-    /// Returns buckets from oldest (left) to newest (right)
+    /// Returns buckets from newest (left) to oldest (right)
     pub async fn get_host_timeline(
         &self,
         host_id: i64,
         num_buckets: usize,
     ) -> Result<Vec<TimelineBucketState>> {
-        // Get last N ping results, ordered from oldest to newest
+        // Get last N ping results, ordered from newest to oldest
         let rows = sqlx::query(
             r#"
             SELECT responded, timestamp
@@ -429,9 +429,9 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        // Reverse to get oldest-to-newest order (left to right)
+        // Keep DESC order: newest to oldest (left to right)
         let mut buckets = Vec::new();
-        for row in rows.iter().rev() {
+        for row in rows.iter() {
             let responded: i64 = row.get("responded");
             let state = if responded != 0 {
                 TimelineBucketState::Online
