@@ -78,13 +78,7 @@ impl Monitor {
                     }
 
                     // Record the ping result
-                    db.record_ping_result(
-                        id,
-                        ping_result.success_count,
-                        ping_result.total_count,
-                        ping_result.avg_latency_ms(),
-                    )
-                    .await?;
+                    db.record_ping_result(id, ping_result.responded).await?;
                 } else {
                     // Existing hosts: "unknown" (server was down, state unknown)
                     db.record_event(id, EventType::Unknown).await?;
@@ -117,9 +111,6 @@ impl Monitor {
                 ip_address: host_config.ip_address,
                 status: initial_status_value,
                 last_check: Utc::now(),
-                success_count: 0,
-                total_count: 0,
-                avg_latency_ms: None,
             };
             initial_status_map.insert(*host_id, initial_status);
         }
@@ -147,30 +138,32 @@ impl Monitor {
         Ok(())
     }
 
-    /// Get timeline for all hosts over a time period
+    /// Get timeline for all hosts showing last N pings
     pub async fn get_timelines(
         &self,
-        duration_hours: u32,
         num_buckets: usize,
     ) -> Result<Vec<HostTimeline>> {
         let end_time = Utc::now();
-        let start_time =
-            end_time - ChronoDuration::hours(duration_hours as i64);
-        let bucket_duration_secs = (duration_hours * 3600) / num_buckets as u32;
 
         let map = self.status_map.read().await;
         let mut timelines = Vec::new();
 
         for (host_id, config) in &self.hosts {
-            let buckets = self
-                .db
-                .get_host_timeline(*host_id, start_time, end_time, num_buckets)
-                .await?;
+            let buckets =
+                self.db.get_host_timeline(*host_id, num_buckets).await?;
 
             let current_status = map
                 .get(host_id)
                 .map(|s| s.status)
                 .unwrap_or(Status::Offline);
+
+            // Calculate start_time based on actual data if available
+            let start_time = if buckets.is_empty() {
+                end_time
+            } else {
+                // Approximate: 15 seconds per bucket
+                end_time - ChronoDuration::seconds((num_buckets * 15) as i64)
+            };
 
             timelines.push(HostTimeline {
                 id: *host_id,
@@ -178,7 +171,7 @@ impl Monitor {
                 ip_address: config.ip_address,
                 current_status,
                 buckets,
-                bucket_duration_secs,
+                bucket_duration_secs: 15, // Each bucket is one ping (15s)
                 start_time,
                 end_time,
             });
@@ -249,13 +242,7 @@ impl Monitor {
         }
 
         // Record ping result
-        db.record_ping_result(
-            host_id,
-            result.success_count,
-            result.total_count,
-            result.avg_latency_ms(),
-        )
-        .await?;
+        db.record_ping_result(host_id, result.responded).await?;
 
         // Update status map
         let host_status = HostStatus {
@@ -264,9 +251,6 @@ impl Monitor {
             ip_address: host.ip_address,
             status: new_status,
             last_check: result.timestamp,
-            success_count: result.success_count,
-            total_count: result.total_count,
-            avg_latency_ms: result.avg_latency_ms(),
         };
 
         let mut map = status_map.write().await;
@@ -319,9 +303,6 @@ mod tests {
         // All hosts should have initial status (offline until first ping)
         for host in &status {
             assert_eq!(host.status, Status::Offline);
-            assert_eq!(host.success_count, 0);
-            assert_eq!(host.total_count, 0);
-            assert_eq!(host.avg_latency_ms, None);
         }
     }
 
@@ -379,7 +360,6 @@ mod tests {
         let initial_status = monitor.get_status().await;
         assert_eq!(initial_status.len(), 1);
         assert_eq!(initial_status[0].status, Status::Online);
-        assert_eq!(initial_status[0].total_count, 0); // count not updated yet in status_map
 
         // Manually trigger one check cycle (simulating what the monitoring loop does)
         monitor.check_all_hosts().await.unwrap();
@@ -390,8 +370,6 @@ mod tests {
 
         // Localhost should be online after ping
         assert_eq!(updated_status[0].status, Status::Online);
-        assert_eq!(updated_status[0].total_count, 1); // 1 ping attempted
-        assert!(updated_status[0].success_count > 0); // At least some succeeded
     }
 
     #[tokio::test]
@@ -424,9 +402,7 @@ mod tests {
         assert_eq!(events[0].event_type, EventType::Offline);
 
         // Simulate some activity (ping result)
-        db.record_ping_result(host_id, 3, 3, Some(15.0))
-            .await
-            .unwrap();
+        db.record_ping_result(host_id, true).await.unwrap();
         db.record_event(host_id, EventType::Online).await.unwrap();
 
         // Drop monitor1 to simulate server crash (no clean shutdown)

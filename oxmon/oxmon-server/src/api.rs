@@ -22,17 +22,9 @@ pub struct ServerContext {
 /// Query parameters for the timelines endpoint
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 struct TimelineQuery {
-    /// Duration in hours to look back (default: 2)
-    #[serde(default = "default_duration_hours")]
-    duration_hours: u32,
-
-    /// Number of time buckets to divide the duration into (default: 20)
+    /// Number of buckets to display (default: 20)
     #[serde(default = "default_num_buckets")]
     num_buckets: usize,
-}
-
-fn default_duration_hours() -> u32 {
-    2
 }
 
 fn default_num_buckets() -> usize {
@@ -62,7 +54,7 @@ async fn get_timelines(
     let timelines = ctx
         .context()
         .monitor
-        .get_timelines(params.duration_hours, params.num_buckets)
+        .get_timelines(params.num_buckets)
         .await
         .map_err(|e| {
             HttpError::for_internal_error(format!(
@@ -86,7 +78,7 @@ async fn get_dashboard(
     let timelines = ctx
         .context()
         .monitor
-        .get_timelines(params.duration_hours, params.num_buckets)
+        .get_timelines(params.num_buckets)
         .await
         .map_err(|e| {
             HttpError::for_internal_error(format!(

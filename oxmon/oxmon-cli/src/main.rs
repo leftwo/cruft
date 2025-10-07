@@ -13,11 +13,7 @@ struct Args {
     #[arg(short = 'w', long)]
     width: Option<usize>,
 
-    /// Duration in hours to look back (default: 2)
-    #[arg(short = 'd', long, default_value = "2")]
-    duration_hours: u32,
-
-    /// Number of time buckets (default: 20)
+    /// Number of buckets to display (default: 20)
     #[arg(short = 'b', long, default_value = "20")]
     num_buckets: usize,
 
@@ -41,13 +37,7 @@ async fn main() -> Result<()> {
 
     match command {
         Command::List => {
-            list_hosts(
-                &args.server_url,
-                args.width,
-                args.duration_hours,
-                args.num_buckets,
-            )
-            .await?
+            list_hosts(&args.server_url, args.width, args.num_buckets).await?
         }
     }
 
@@ -72,13 +62,10 @@ fn get_terminal_width(width_arg: Option<usize>) -> usize {
 async fn list_hosts(
     server_url: &str,
     width_arg: Option<usize>,
-    duration_hours: u32,
     num_buckets: usize,
 ) -> Result<()> {
-    let url = format!(
-        "{}/api/timelines?duration_hours={}&num_buckets={}",
-        server_url, duration_hours, num_buckets
-    );
+    let url =
+        format!("{}/api/timelines?num_buckets={}", server_url, num_buckets);
     let response = reqwest::get(&url).await?;
 
     if !response.status().is_success() {
@@ -106,7 +93,7 @@ async fn list_hosts(
     const FIXED_COLUMNS: usize = HOSTNAME_WIDTH + IP_WIDTH + STATUS_WIDTH + 4;
 
     // Print table header
-    let history_label = format!("HISTORY (Past {}h)", duration_hours);
+    let history_label = format!("HISTORY (Last {} pings)", num_buckets);
     println!(
         "{:<16} {:<15} {:<3} {}",
         "HOSTNAME", "IP ADDRESS", "STA", history_label
