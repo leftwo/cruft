@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - This prevents accidentally committing untracked files or temporary files
 - After making changes, propose files to add and commit message, wait for user approval
 - Do NOT include emoji or tool references (like "🤖 Generated with Claude Code") in commit messages
+- Keep git commit lines to 80 characters wide, but take as many lines as needed
 
 ### Rust Development
 
