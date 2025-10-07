@@ -187,12 +187,12 @@ impl Monitor {
         Ok(timelines)
     }
 
-    /// Start monitoring loop (pings every 10 seconds)
+    /// Start monitoring loop (pings every 15 seconds)
     pub async fn start(self: Arc<Self>) -> Result<()> {
         // Do an immediate first check on startup
         self.check_all_hosts().await?;
 
-        let mut interval = time::interval(Duration::from_secs(10));
+        let mut interval = time::interval(Duration::from_secs(15));
 
         loop {
             interval.tick().await;
@@ -390,7 +390,7 @@ mod tests {
 
         // Localhost should be online after ping
         assert_eq!(updated_status[0].status, Status::Online);
-        assert_eq!(updated_status[0].total_count, 3); // 3 pings attempted
+        assert_eq!(updated_status[0].total_count, 1); // 1 ping attempted
         assert!(updated_status[0].success_count > 0); // At least some succeeded
     }
 

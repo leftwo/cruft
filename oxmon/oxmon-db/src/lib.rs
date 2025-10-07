@@ -129,7 +129,6 @@ impl Database {
         }
     }
 
-
     /// Record a host event (state transition)
     pub async fn record_event(
         &self,

@@ -157,7 +157,7 @@ mod tests {
             hostname: "test".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
             success_count: 0,
-            total_count: 3,
+            total_count: 1,
             latencies_ms: vec![],
             timestamp: Utc::now(),
         };
@@ -171,7 +171,7 @@ mod tests {
             hostname: "test".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
             success_count: 1,
-            total_count: 3,
+            total_count: 1,
             latencies_ms: vec![50.0],
             timestamp: Utc::now(),
         };
@@ -184,8 +184,8 @@ mod tests {
         let result = PingResult {
             hostname: "test".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
-            success_count: 3,
-            total_count: 3,
+            success_count: 1,
+            total_count: 1,
             latencies_ms: vec![10.0, 20.0, 30.0],
             timestamp: Utc::now(),
         };
@@ -199,7 +199,7 @@ mod tests {
             hostname: "test".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
             success_count: 1,
-            total_count: 3,
+            total_count: 1,
             latencies_ms: vec![50.0],
             timestamp: Utc::now(),
         };
@@ -213,7 +213,7 @@ mod tests {
             hostname: "test".to_string(),
             ip_address: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
             success_count: 0,
-            total_count: 3,
+            total_count: 1,
             latencies_ms: vec![],
             timestamp: Utc::now(),
         };
@@ -235,8 +235,8 @@ mod tests {
             ip_address: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
             status: Status::Online,
             last_check: Utc::now(),
-            success_count: 3,
-            total_count: 3,
+            success_count: 1,
+            total_count: 1,
             avg_latency_ms: Some(15.5),
         };
 

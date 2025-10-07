@@ -11,44 +11,43 @@ mod monitor;
 pub use config::load_hosts_from_file;
 pub use monitor::Monitor;
 
-/// Ping a host 3 times with 5 second timeout
+/// Ping a host once with 10 second timeout
 pub async fn ping_host(host: &HostConfig) -> Result<PingResult> {
     let config = Config::default();
     let client = Client::new(&config)?;
 
     let mut latencies = Vec::new();
-    let total_count = 3;
-    let timeout = Duration::from_secs(5);
+    let total_count = 1;
+    let timeout = Duration::from_secs(10);
+    let timestamp = Utc::now();
 
-    for sequence in 0..total_count {
-        let payload = [0; 56];
+    let payload = [0; 56];
 
-        match host.ip_address {
-            IpAddr::V4(addr) => {
-                let mut pinger =
-                    client.pinger(addr.into(), PingIdentifier(1)).await;
+    match host.ip_address {
+        IpAddr::V4(addr) => {
+            let mut pinger =
+                client.pinger(addr.into(), PingIdentifier(1)).await;
 
-                if let Ok(Ok((_, duration))) = tokio::time::timeout(
-                    timeout,
-                    pinger.ping(PingSequence(sequence as u16), &payload),
-                )
-                .await
-                {
-                    latencies.push(duration.as_secs_f64() * 1000.0);
-                }
+            if let Ok(Ok((_, duration))) = tokio::time::timeout(
+                timeout,
+                pinger.ping(PingSequence(0), &payload),
+            )
+            .await
+            {
+                latencies.push(duration.as_secs_f64() * 1000.0);
             }
-            IpAddr::V6(addr) => {
-                let mut pinger =
-                    client.pinger(addr.into(), PingIdentifier(1)).await;
+        }
+        IpAddr::V6(addr) => {
+            let mut pinger =
+                client.pinger(addr.into(), PingIdentifier(1)).await;
 
-                if let Ok(Ok((_, duration))) = tokio::time::timeout(
-                    timeout,
-                    pinger.ping(PingSequence(sequence as u16), &payload),
-                )
-                .await
-                {
-                    latencies.push(duration.as_secs_f64() * 1000.0);
-                }
+            if let Ok(Ok((_, duration))) = tokio::time::timeout(
+                timeout,
+                pinger.ping(PingSequence(0), &payload),
+            )
+            .await
+            {
+                latencies.push(duration.as_secs_f64() * 1000.0);
             }
         }
     }
@@ -61,6 +60,6 @@ pub async fn ping_host(host: &HostConfig) -> Result<PingResult> {
         success_count,
         total_count,
         latencies_ms: latencies,
-        timestamp: Utc::now(),
+        timestamp,
     })
 }
