@@ -148,8 +148,8 @@ fn render_timeline(
         .iter()
         .take(max_width)
         .map(|state| match state {
-            TimelineBucketState::Online => '█',
-            TimelineBucketState::Offline => '░',
+            TimelineBucketState::Online => '-',
+            TimelineBucketState::Offline => '_',
             TimelineBucketState::NoData => '·',
         })
         .collect()

@@ -40,8 +40,7 @@ impl Database {
                 hostname TEXT NOT NULL,
                 ip_address TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT
-                    (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                first_inserted TEXT
+                    (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             )
             "#,
         )
@@ -130,26 +129,6 @@ impl Database {
         }
     }
 
-    /// Set first_inserted timestamp for a host
-    pub async fn set_first_inserted(
-        &self,
-        host_id: i64,
-        timestamp: DateTime<Utc>,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE hosts
-            SET first_inserted = ?
-            WHERE id = ? AND first_inserted IS NULL
-            "#,
-        )
-        .bind(timestamp.to_rfc3339())
-        .bind(host_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
 
     /// Record a host event (state transition)
     pub async fn record_event(

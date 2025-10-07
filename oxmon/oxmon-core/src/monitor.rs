@@ -70,10 +70,8 @@ impl Monitor {
                     let is_online = ping_result.is_online();
 
                     if is_online {
-                        // Host is online - record online event and set first_inserted
+                        // Host is online - record online event
                         db.record_event(id, EventType::Online).await?;
-                        db.set_first_inserted(id, ping_result.timestamp)
-                            .await?;
                     } else {
                         // Host is offline - record offline event
                         db.record_event(id, EventType::Offline).await?;
@@ -238,11 +236,6 @@ impl Monitor {
         } else {
             Status::Offline
         };
-
-        // Set first_inserted timestamp if host came online
-        if new_status == Status::Online {
-            db.set_first_inserted(host_id, result.timestamp).await?;
-        }
 
         // Get previous status
         let prev_status = {
