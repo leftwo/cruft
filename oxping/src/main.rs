@@ -118,33 +118,60 @@ fn setup_panic_hook() {
 fn draw_ui(results: &[HostResult]) -> io::Result<()> {
     let mut stdout = io::stdout();
 
+    // Get terminal size
+    let (width, _height) = terminal::size()?;
+    let width = width as usize;
+
+    // Ensure minimum width
+    let width = width.max(40);
+
+    // Calculate column widths
+    // Format: "║ Host IP Status ║"
+    // Borders take 4 chars: "║ " and " ║"
+    // Status takes 8 chars: " Status " (including space and symbol)
+    let available = width.saturating_sub(4 + 8);
+    let host_width = (available / 2).max(8);
+    let ip_width = available.saturating_sub(host_width).max(7);
+
     execute!(
         stdout,
         terminal::Clear(ClearType::All),
         cursor::MoveTo(0, 0)
     )?;
 
-    writeln!(
+    // Draw top border
+    let top_border = format!("╔{}╗", "═".repeat(width - 2));
+    write!(stdout, "{}\r\n", top_border)?;
+
+    // Draw title
+    let title = "OxPing Monitor";
+    let title_padding = (width - 2).saturating_sub(title.len()) / 2;
+    write!(
         stdout,
-        "╔══════════════════════════════════════════════════╗"
-    )?;
-    writeln!(
-        stdout,
-        "║              OxPing Monitor                      ║"
-    )?;
-    writeln!(
-        stdout,
-        "╠══════════════════════════════════════════════════╣"
-    )?;
-    writeln!(
-        stdout,
-        "║ Host                    IP               Status  ║"
-    )?;
-    writeln!(
-        stdout,
-        "╠══════════════════════════════════════════════════╣"
+        "║{}{}{}║\r\n",
+        " ".repeat(title_padding),
+        title,
+        " ".repeat(width - 2 - title_padding - title.len())
     )?;
 
+    // Draw separator
+    let separator = format!("╠{}╣", "═".repeat(width - 2));
+    write!(stdout, "{}\r\n", separator)?;
+
+    // Draw header
+    let header = format!(
+        "║ {:<host_width$} {:<ip_width$} Status ║",
+        "Host",
+        "IP",
+        host_width = host_width,
+        ip_width = ip_width
+    );
+    write!(stdout, "{}\r\n", header)?;
+
+    // Draw separator
+    write!(stdout, "{}\r\n", separator)?;
+
+    // Draw each host
     for result in results {
         let status_char = match result.status {
             HostStatus::Up => "●",
@@ -154,18 +181,36 @@ fn draw_ui(results: &[HostResult]) -> io::Result<()> {
             HostStatus::Up => "\x1b[32m",   // green
             HostStatus::Down => "\x1b[31m", // red
         };
-        writeln!(
+
+        // Truncate name and IP if needed
+        let name = if result.host.name.len() > host_width {
+            format!("{}…", &result.host.name[..host_width - 1])
+        } else {
+            result.host.name.clone()
+        };
+
+        let ip = if result.host.ip.len() > ip_width {
+            format!("{}…", &result.host.ip[..ip_width - 1])
+        } else {
+            result.host.ip.clone()
+        };
+
+        write!(
             stdout,
-            "║ {:<23} {:<16} {}{}\x1b[0m     ║",
-            result.host.name, result.host.ip, status_color, status_char
+            "║ {:<host_width$} {:<ip_width$} {}{}\x1b[0m      ║\r\n",
+            name,
+            ip,
+            status_color,
+            status_char,
+            host_width = host_width,
+            ip_width = ip_width
         )?;
     }
 
-    writeln!(
-        stdout,
-        "╚══════════════════════════════════════════════════╝"
-    )?;
-    writeln!(stdout, "\nPress Ctrl-C to exit")?;
+    // Draw bottom border
+    let bottom_border = format!("╚{}╝", "═".repeat(width - 2));
+    write!(stdout, "{}\r\n", bottom_border)?;
+    write!(stdout, "\r\nPress Ctrl-C to exit")?;
 
     stdout.flush()?;
     Ok(())
