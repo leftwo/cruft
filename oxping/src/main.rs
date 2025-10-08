@@ -16,6 +16,7 @@ use std::time::Duration;
 // Configuration constants
 const PING_INTERVAL_SECS: u64 = 10;
 const TIME_MARKER_INTERVAL_SECS: u64 = 60;
+const MAX_HISTORY_SIZE: usize = 5000;
 
 #[derive(Parser)]
 #[command(name = "oxping")]
@@ -279,7 +280,7 @@ async fn main() {
             for host in &hosts {
                 let entry = history.entry(host.ip.clone()).or_default();
                 entry.push_front(HistoryEntry::TimeMarker);
-                if entry.len() > 200 {
+                if entry.len() > MAX_HISTORY_SIZE {
                     entry.pop_back();
                 }
             }
@@ -328,8 +329,8 @@ async fn main() {
         for result in &results {
             let entry = history.entry(result.host.ip.clone()).or_default();
             entry.push_front(HistoryEntry::Status(result.status));
-            // Keep only what fits on screen (no need to store more)
-            if entry.len() > 200 {
+            // Keep only MAX_HISTORY_SIZE entries
+            if entry.len() > MAX_HISTORY_SIZE {
                 entry.pop_back();
             }
         }
@@ -560,21 +561,21 @@ mod tests {
 
         let entry = history.entry(ip.clone()).or_default();
 
-        // Add more than 200 items
-        for i in 0..250 {
+        // Add more than MAX_HISTORY_SIZE items
+        for i in 0..(MAX_HISTORY_SIZE + 50) {
             entry.push_front(HistoryEntry::Status(if i % 2 == 0 {
                 HostStatus::Up
             } else {
                 HostStatus::Down
             }));
 
-            // Keep only 200 (simulating the main loop logic)
-            if entry.len() > 200 {
+            // Keep only MAX_HISTORY_SIZE (simulating the main loop logic)
+            if entry.len() > MAX_HISTORY_SIZE {
                 entry.pop_back();
             }
         }
 
-        assert_eq!(history.get(&ip).unwrap().len(), 200);
+        assert_eq!(history.get(&ip).unwrap().len(), MAX_HISTORY_SIZE);
     }
 
     #[test]
