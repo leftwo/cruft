@@ -3,8 +3,7 @@ use clap::Parser;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
-    execute,
-    terminal,
+    execute, terminal,
 };
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -147,7 +146,7 @@ fn get_visible_entries(
 }
 
 fn draw_ui(
-    results: &[HostResult],
+    hosts: &[Host],
     history: &HostHistory,
     last_update: &str,
     scroll_offset: usize,
@@ -163,10 +162,10 @@ fn draw_ui(
     let width = width.max(40);
 
     // Calculate column widths
-    // Find longest hostname (max 16 chars)
-    let max_host_len = results
+    // Find longest hostname (max 16 chars) from hosts list
+    let max_host_len = hosts
         .iter()
-        .map(|r| r.host.name.len().min(16))
+        .map(|h| h.name.len().min(16))
         .max()
         .unwrap_or(4);
     let host_width = max_host_len.max(4); // At least "Host"
@@ -211,18 +210,18 @@ fn draw_ui(
     write!(stdout, "{}\r\n", separator_line)?;
     current_line_count += 1;
 
-    // Draw each host with timeline
-    for result in results {
+    // Draw each host with timeline (use hosts list so we show all hosts even without results)
+    for host in hosts {
         // Truncate hostname to 16 chars max
-        let name = if result.host.name.len() > 16 {
-            &result.host.name[..16]
+        let name = if host.name.len() > 16 {
+            &host.name[..16]
         } else {
-            &result.host.name
+            &host.name
         };
 
         // Get history for this host
         let host_history = history
-            .get(&result.host.ip)
+            .get(&host.ip)
             .map(|h| h.iter().copied().collect::<Vec<_>>())
             .unwrap_or_default();
 
@@ -261,7 +260,7 @@ fn draw_ui(
         let host_line = format!(
             "{:<host_width$} {:<ip_width$} {}{}{}",
             name,
-            result.host.ip,
+            host.ip,
             left_indicator,
             timeline,
             right_indicator,
@@ -338,21 +337,6 @@ async fn main() {
         let mut iteration_count = 0;
 
         loop {
-            let start = tokio::time::Instant::now();
-
-            // Add time marker at the calculated interval
-            if iteration_count > 0 && iteration_count % iterations_per_marker == 0 {
-                let mut hist = history_clone.lock().unwrap();
-                for host in &hosts_clone {
-                    let entry = hist.entry(host.ip.clone()).or_default();
-                    entry.push_front(HistoryEntry::TimeMarker);
-                    if entry.len() > MAX_HISTORY_SIZE {
-                        entry.pop_back();
-                    }
-                }
-            }
-            iteration_count += 1;
-
             // Ping all hosts in parallel
             let mut tasks = Vec::new();
             for host in &hosts_clone {
@@ -407,26 +391,32 @@ async fn main() {
                 }
             }
 
-            // Wait for next interval
-            let elapsed = start.elapsed();
-            let target_duration = Duration::from_secs(PING_INTERVAL_SECS);
-            if elapsed < target_duration {
-                tokio::time::sleep(target_duration - elapsed).await;
+            iteration_count += 1;
+
+            // Add time marker at the calculated interval
+            if iteration_count > 0 && iteration_count % iterations_per_marker == 0 {
+                let mut hist = history_clone.lock().unwrap();
+                for host in &hosts_clone {
+                    let entry = hist.entry(host.ip.clone()).or_default();
+                    entry.push_front(HistoryEntry::TimeMarker);
+                    if entry.len() > MAX_HISTORY_SIZE {
+                        entry.pop_back();
+                    }
+                }
             }
+
+            // Wait for next interval
+            tokio::time::sleep(Duration::from_secs(PING_INTERVAL_SECS)).await;
         }
     });
 
     // UI task (main thread)
     let mut scroll_offset: usize = 0;
     let mut previous_line_count: usize = 0;
+    let mut is_first_update = true;
 
     loop {
         // Get current state from shared data
-        let current_results = {
-            let res = results.lock().unwrap();
-            res.clone()
-        };
-
         let current_history = {
             let hist = history.lock().unwrap();
             hist.clone()
@@ -437,7 +427,7 @@ async fn main() {
 
         // Draw the UI
         if let Err(e) = draw_ui(
-            &current_results,
+            &hosts,
             &current_history,
             &last_update,
             scroll_offset,
@@ -452,7 +442,12 @@ async fn main() {
 
         if scroll_offset == 0 {
             // Live mode: wait for timer interval and check for keys
-            let sleep_duration = Duration::from_secs(PING_INTERVAL_SECS);
+            // First update waits 5 seconds, subsequent updates wait 10 seconds
+            let sleep_duration = if is_first_update {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_secs(PING_INTERVAL_SECS)
+            };
 
             let start_sleep = tokio::time::Instant::now();
             while start_sleep.elapsed() < sleep_duration {
@@ -498,6 +493,11 @@ async fn main() {
                         _ => {}
                     }
                 }
+            }
+
+            // Mark first update as complete
+            if is_first_update {
+                is_first_update = false;
             }
         } else {
             // History mode: block waiting for keypress only
