@@ -153,41 +153,27 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
         cursor::MoveTo(0, 0)
     )?;
 
-    // Draw top border
-    let top_border = format!("╔{}╗", "═".repeat(width - 2));
-    write!(stdout, "{}\r\n", top_border)?;
-
-    // Draw title with timestamp on the right
-    let title = "OxPing Monitor";
+    // Draw header with timestamp on the right
     let timestamp = format!("Updated: {}", last_update);
+    let header_left = format!(
+        "{:<host_width$} {:<ip_width$} Timeline",
+        "Host",
+        "IP",
+        host_width = host_width,
+        ip_width = ip_width
+    );
     let spacing = width
-        .saturating_sub(2)
-        .saturating_sub(title.len())
+        .saturating_sub(header_left.len())
         .saturating_sub(timestamp.len());
     write!(
         stdout,
-        "║{}{}{}║\r\n",
-        title,
+        "{}{}{}\r\n",
+        header_left,
         " ".repeat(spacing),
         timestamp
     )?;
 
     // Draw separator
-    let separator = format!("╠{}╣", "═".repeat(width - 2));
-    write!(stdout, "{}\r\n", separator)?;
-
-    // Draw header
-    write!(
-        stdout,
-        "{:<host_width$} {:<ip_width$} Timeline{}\r\n",
-        "Host",
-        "IP",
-        " ".repeat(timeline_width.saturating_sub(8)),
-        host_width = host_width,
-        ip_width = ip_width
-    )?;
-
-    // Draw separator (top/bottom only)
     let separator_line = "═".repeat(width);
     write!(stdout, "{}\r\n", separator_line)?;
 
@@ -233,9 +219,6 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
         )?;
     }
 
-    // Draw bottom border
-    let bottom_border = format!("╚{}╝", "═".repeat(width - 2));
-    write!(stdout, "{}\r\n", bottom_border)?;
     write!(stdout, "\r\nPress Ctrl-C to exit")?;
 
     stdout.flush()?;
