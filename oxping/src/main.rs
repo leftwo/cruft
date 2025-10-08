@@ -1,3 +1,4 @@
+use chrono::Local;
 use clap::Parser;
 use crossterm::{
     cursor,
@@ -119,7 +120,7 @@ fn setup_panic_hook() {
     }));
 }
 
-fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
+fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // Get terminal size
@@ -142,9 +143,9 @@ fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
     let ip_width = 15;
 
     // Timeline gets the rest
-    // Format: "║ Host IP Timeline ║"
-    // Borders: 2, spaces: 4 (1 after ║, 1 between cols, 1 between cols, 1 before ║)
-    let timeline_width = width.saturating_sub(2 + host_width + ip_width + 4);
+    // Format: "Host IP Timeline"
+    // spaces: 2 (1 between cols, 1 between cols)
+    let timeline_width = width.saturating_sub(host_width + ip_width + 2);
 
     execute!(
         stdout,
@@ -156,15 +157,19 @@ fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
     let top_border = format!("╔{}╗", "═".repeat(width - 2));
     write!(stdout, "{}\r\n", top_border)?;
 
-    // Draw title
+    // Draw title with timestamp on the right
     let title = "OxPing Monitor";
-    let title_padding = (width - 2).saturating_sub(title.len()) / 2;
+    let timestamp = format!("Updated: {}", last_update);
+    let spacing = width
+        .saturating_sub(2)
+        .saturating_sub(title.len())
+        .saturating_sub(timestamp.len());
     write!(
         stdout,
         "║{}{}{}║\r\n",
-        " ".repeat(title_padding),
         title,
-        " ".repeat(width - 2 - title_padding - title.len())
+        " ".repeat(spacing),
+        timestamp
     )?;
 
     // Draw separator
@@ -174,7 +179,7 @@ fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
     // Draw header
     write!(
         stdout,
-        "║ {:<host_width$} {:<ip_width$} Timeline{}║\r\n",
+        "{:<host_width$} {:<ip_width$} Timeline{}\r\n",
         "Host",
         "IP",
         " ".repeat(timeline_width.saturating_sub(8)),
@@ -182,8 +187,9 @@ fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
         ip_width = ip_width
     )?;
 
-    // Draw separator
-    write!(stdout, "{}\r\n", separator)?;
+    // Draw separator (top/bottom only)
+    let separator_line = "═".repeat(width);
+    write!(stdout, "{}\r\n", separator_line)?;
 
     // Draw each host with timeline
     for result in results {
@@ -218,7 +224,7 @@ fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
 
         write!(
             stdout,
-            "║ {:<host_width$} {:<ip_width$} {}║\r\n",
+            "{:<host_width$} {:<ip_width$} {}\r\n",
             name,
             result.host.ip,
             timeline,
@@ -313,16 +319,19 @@ async fn main() {
             }
         }
 
+        // Format current time for display
+        let last_update = Local::now().format("%H:%M:%S").to_string();
+
         // Draw the UI
-        if let Err(e) = draw_ui(&results, &history) {
+        if let Err(e) = draw_ui(&results, &history, &last_update) {
             eprintln!("Error drawing UI: {}", e);
             break;
         }
 
         // Wait for next interval or check for Ctrl-C
         let elapsed = start.elapsed();
-        let sleep_duration = if elapsed < Duration::from_secs(15) {
-            Duration::from_secs(15) - elapsed
+        let sleep_duration = if elapsed < Duration::from_secs(10) {
+            Duration::from_secs(10) - elapsed
         } else {
             Duration::from_millis(100)
         };
@@ -336,11 +345,11 @@ async fn main() {
             let poll_result = tokio::task::spawn_blocking(|| {
                 if event::poll(Duration::from_millis(100)).unwrap_or(false)
                     && let Ok(Event::Key(key_event)) = event::read()
-                        && key_event.code == KeyCode::Char('c')
-                            && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                        {
-                            return true;
-                        }
+                    && key_event.code == KeyCode::Char('c')
+                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    return true;
+                }
                 false
             })
             .await;

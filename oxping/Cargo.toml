@@ -8,3 +8,4 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.27"
 ctrlc = "3"
+chrono = "0.4"
