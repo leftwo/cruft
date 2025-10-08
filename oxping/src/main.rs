@@ -365,3 +365,221 @@ async fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // ========== Unit Tests for parse_hosts_file ==========
+
+    #[test]
+    fn test_parse_valid_hosts() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "host1,192.168.1.1").unwrap();
+        writeln!(file, "host2,10.0.0.1").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_ok());
+
+        let hosts = result.unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[0].name, "host1");
+        assert_eq!(hosts[0].ip, "192.168.1.1");
+        assert_eq!(hosts[1].name, "host2");
+        assert_eq!(hosts[1].ip, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_parse_with_whitespace() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "  host1  ,  192.168.1.1  ").unwrap();
+        writeln!(file, "host2,10.0.0.1").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_ok());
+
+        let hosts = result.unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[0].name, "host1");
+        assert_eq!(hosts[0].ip, "192.168.1.1");
+    }
+
+    #[test]
+    fn test_parse_with_empty_lines() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "host1,192.168.1.1").unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "   ").unwrap();
+        writeln!(file, "host2,10.0.0.1").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_ok());
+
+        let hosts = result.unwrap();
+        assert_eq!(hosts.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_with_comments() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "# This is a comment").unwrap();
+        writeln!(file, "host1,192.168.1.1").unwrap();
+        writeln!(file, "# Another comment").unwrap();
+        writeln!(file, "host2,10.0.0.1").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_ok());
+
+        let hosts = result.unwrap();
+        assert_eq!(hosts.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_invalid_format_missing_comma() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "host1 192.168.1.1").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid format at line 1"));
+    }
+
+    #[test]
+    fn test_parse_invalid_format_too_many_fields() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "host1,192.168.1.1,extra").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid format"));
+    }
+
+    #[test]
+    fn test_parse_empty_file() {
+        let file = NamedTempFile::new().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No hosts found"));
+    }
+
+    #[test]
+    fn test_parse_only_comments() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "# Comment 1").unwrap();
+        writeln!(file, "# Comment 2").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No hosts found"));
+    }
+
+    #[test]
+    fn test_parse_nonexistent_file() {
+        let result = parse_hosts_file(&PathBuf::from("/nonexistent/file.txt"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to open file"));
+    }
+
+    // ========== Integration Tests ==========
+
+    #[test]
+    fn test_host_result_creation() {
+        let host = Host {
+            name: "test".to_string(),
+            ip: "192.168.1.1".to_string(),
+        };
+
+        let result = HostResult {
+            host: host.clone(),
+            status: HostStatus::Up,
+        };
+
+        assert_eq!(result.host.name, "test");
+        assert_eq!(result.host.ip, "192.168.1.1");
+        assert_eq!(result.status, HostStatus::Up);
+    }
+
+    #[test]
+    fn test_host_status_enum() {
+        let up = HostStatus::Up;
+        let down = HostStatus::Down;
+
+        assert_eq!(up, HostStatus::Up);
+        assert_eq!(down, HostStatus::Down);
+        assert_ne!(up, down);
+    }
+
+    #[test]
+    fn test_history_management() {
+        let mut history: HostHistory = HashMap::new();
+        let ip = "192.168.1.1".to_string();
+
+        // Add some history
+        let entry = history.entry(ip.clone()).or_default();
+        entry.push_front(HostStatus::Up);
+        entry.push_front(HostStatus::Down);
+        entry.push_front(HostStatus::Up);
+
+        assert_eq!(history.get(&ip).unwrap().len(), 3);
+        assert_eq!(*history.get(&ip).unwrap().front().unwrap(), HostStatus::Up);
+    }
+
+    #[test]
+    fn test_history_max_size() {
+        let mut history: HostHistory = HashMap::new();
+        let ip = "192.168.1.1".to_string();
+
+        let entry = history.entry(ip.clone()).or_default();
+
+        // Add more than 200 items
+        for i in 0..250 {
+            entry.push_front(if i % 2 == 0 {
+                HostStatus::Up
+            } else {
+                HostStatus::Down
+            });
+
+            // Keep only 200 (simulating the main loop logic)
+            if entry.len() > 200 {
+                entry.pop_back();
+            }
+        }
+
+        assert_eq!(history.get(&ip).unwrap().len(), 200);
+    }
+
+    #[test]
+    fn test_parse_real_world_file() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "# Network Hosts").unwrap();
+        writeln!(file, "router,192.168.1.1").unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "# Servers").unwrap();
+        writeln!(file, "web-server,10.0.1.100").unwrap();
+        writeln!(file, "db-server,10.0.1.200").unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "# DNS").unwrap();
+        writeln!(file, "dns1,8.8.8.8").unwrap();
+        file.flush().unwrap();
+
+        let result = parse_hosts_file(&file.path().to_path_buf());
+        assert!(result.is_ok());
+
+        let hosts = result.unwrap();
+        assert_eq!(hosts.len(), 4);
+        assert_eq!(hosts[0].name, "router");
+        assert_eq!(hosts[1].name, "web-server");
+        assert_eq!(hosts[2].name, "db-server");
+        assert_eq!(hosts[3].name, "dns1");
+    }
+}

@@ -9,3 +9,6 @@ tokio = { version = "1", features = ["full"] }
 crossterm = "0.27"
 ctrlc = "3"
 chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
