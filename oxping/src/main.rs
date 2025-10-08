@@ -1,14 +1,14 @@
 use clap::Parser;
 use crossterm::{
-    cursor, execute,
+    cursor,
+    event::{self, Event, KeyCode, KeyModifiers},
+    execute,
     terminal::{self, ClearType},
 };
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -177,14 +177,6 @@ async fn main() {
 
     let args = Args::parse();
 
-    // Set up Ctrl-C handler
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl-C handler");
-
     let hosts = match parse_hosts_file(&args.file) {
         Ok(h) => h,
         Err(e) => {
@@ -202,7 +194,7 @@ async fn main() {
         }
     };
 
-    while running.load(Ordering::SeqCst) {
+    loop {
         let start = tokio::time::Instant::now();
 
         // Ping all hosts in parallel
@@ -249,10 +241,35 @@ async fn main() {
             break;
         }
 
-        // Wait for next interval or quit signal
+        // Wait for next interval or check for Ctrl-C
         let elapsed = start.elapsed();
-        if elapsed < Duration::from_secs(15) {
-            tokio::time::sleep(Duration::from_secs(15) - elapsed).await;
+        let sleep_duration = if elapsed < Duration::from_secs(15) {
+            Duration::from_secs(15) - elapsed
+        } else {
+            Duration::from_millis(100)
+        };
+
+        // Use select to wait for either timeout or Ctrl-C
+        tokio::select! {
+            _ = tokio::time::sleep(sleep_duration) => {
+                // Timeout reached, continue to next iteration
+            }
+            ctrl_c = tokio::task::spawn_blocking(move || {
+                // Poll for keyboard events with short timeout
+                loop {
+                    if event::poll(Duration::from_millis(100)).unwrap_or(false)
+                        && let Ok(Event::Key(key_event)) = event::read()
+                            && key_event.code == KeyCode::Char('c')
+                                && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                return true;
+                            }
+                }
+            }) => {
+                if ctrl_c.unwrap_or(false) {
+                    break;
+                }
+            }
         }
     }
 }
