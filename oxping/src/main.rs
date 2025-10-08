@@ -173,10 +173,10 @@ fn draw_ui(
     // IP is fixed at 15 chars (for IPv4 xxx.xxx.xxx.xxx)
     let ip_width = 15;
 
-    // Timeline gets the rest
-    // Format: "Host IP Timeline"
-    // spaces: 2 (1 between cols, 1 between cols)
-    let timeline_width = width.saturating_sub(host_width + ip_width + 2);
+    // Timeline gets the rest, minus 2 for scroll indicators
+    // Format: "Host IP < Timeline >"
+    // spaces: 2 (1 between cols, 1 between cols) + 2 (left/right indicators)
+    let timeline_width = width.saturating_sub(host_width + ip_width + 2 + 2);
 
     execute!(
         stdout,
@@ -191,7 +191,7 @@ fn draw_ui(
         format!("PAUSED - Offset: {}", scroll_offset)
     };
     let header_left = format!(
-        "{:<host_width$} {:<ip_width$} Timeline",
+        "{:<host_width$} {:<ip_width$}  Timeline",
         "Host",
         "IP",
         host_width = host_width,
@@ -252,12 +252,20 @@ fn draw_ui(
             timeline.push_str(&" ".repeat(timeline_width - blocks_shown));
         }
 
+        // Determine scroll indicators
+        let has_older = scroll_offset + timeline_width < host_history.len();
+        let has_newer = scroll_offset > 0;
+        let left_indicator = if has_newer { "<" } else { " " };
+        let right_indicator = if has_older { ">" } else { " " };
+
         write!(
             stdout,
-            "{:<host_width$} {:<ip_width$} {}\r\n",
+            "{:<host_width$} {:<ip_width$} {}{}{}\r\n",
             name,
             result.host.ip,
+            left_indicator,
             timeline,
+            right_indicator,
             host_width = host_width,
             ip_width = ip_width
         )?;
