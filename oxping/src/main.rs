@@ -4,7 +4,7 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{self, ClearType},
+    terminal,
 };
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -151,6 +151,7 @@ fn draw_ui(
     history: &HostHistory,
     last_update: &str,
     scroll_offset: usize,
+    previous_line_count: &mut usize,
 ) -> io::Result<()> {
     let mut stdout = io::stdout();
 
@@ -178,11 +179,7 @@ fn draw_ui(
     // spaces: 2 (1 between cols, 1 between cols) + 2 (left/right indicators)
     let timeline_width = width.saturating_sub(host_width + ip_width + 2 + 2);
 
-    execute!(
-        stdout,
-        terminal::Clear(ClearType::All),
-        cursor::MoveTo(0, 0)
-    )?;
+    let mut current_line_count = 0;
 
     // Draw header with timestamp or mode indicator on the right
     let mode_indicator = if scroll_offset == 0 {
@@ -200,17 +197,19 @@ fn draw_ui(
     let spacing = width
         .saturating_sub(header_left.len())
         .saturating_sub(mode_indicator.len());
-    write!(
-        stdout,
-        "{}{}{}\r\n",
-        header_left,
-        " ".repeat(spacing),
-        mode_indicator
-    )?;
 
-    // Draw separator
-    let separator_line = "═".repeat(width);
+    // Position cursor and write line padded to full width
+    let header_line = format!("{}{}{}", header_left, " ".repeat(spacing), mode_indicator);
+    let header_padded = format!("{:<width$}", header_line, width = width);
+    execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
+    write!(stdout, "{}\r\n", header_padded)?;
+    current_line_count += 1;
+
+    // Draw separator padded to full width
+    let separator_line = format!("{:<width$}", "═".repeat(width), width = width);
+    execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
     write!(stdout, "{}\r\n", separator_line)?;
+    current_line_count += 1;
 
     // Draw each host with timeline
     for result in results {
@@ -258,9 +257,9 @@ fn draw_ui(
         let left_indicator = if has_newer { "<" } else { " " };
         let right_indicator = if has_older { ">" } else { " " };
 
-        write!(
-            stdout,
-            "{:<host_width$} {:<ip_width$} {}{}{}\r\n",
+        // Build the complete line and pad to full width
+        let host_line = format!(
+            "{:<host_width$} {:<ip_width$} {}{}{}",
             name,
             result.host.ip,
             left_indicator,
@@ -268,10 +267,34 @@ fn draw_ui(
             right_indicator,
             host_width = host_width,
             ip_width = ip_width
-        )?;
+        );
+        let host_line_padded = format!("{:<width$}", host_line, width = width);
+        execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
+        write!(stdout, "{}\r\n", host_line_padded)?;
+        current_line_count += 1;
     }
 
-    write!(stdout, "\r\nPress Ctrl-C to exit")?;
+    // Blank line padded to full width
+    let blank_line = format!("{:<width$}", "", width = width);
+    execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
+    write!(stdout, "{}\r\n", blank_line)?;
+    current_line_count += 1;
+
+    // Footer line padded to full width
+    let footer_line = format!("{:<width$}", "Press Ctrl-C to exit", width = width);
+    execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
+    write!(stdout, "{}", footer_line)?;
+    current_line_count += 1;
+
+    // Overwrite any remaining lines from previous display with blank lines
+    while current_line_count < *previous_line_count {
+        let blank_line = format!("{:<width$}", "", width = width);
+        execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
+        write!(stdout, "{}", blank_line)?;
+        current_line_count += 1;
+    }
+
+    *previous_line_count = current_line_count;
 
     stdout.flush()?;
     Ok(())
@@ -395,6 +418,7 @@ async fn main() {
 
     // UI task (main thread)
     let mut scroll_offset: usize = 0;
+    let mut previous_line_count: usize = 0;
 
     loop {
         // Get current state from shared data
@@ -417,6 +441,7 @@ async fn main() {
             &current_history,
             &last_update,
             scroll_offset,
+            &mut previous_line_count,
         ) {
             eprintln!("Error drawing UI: {}", e);
             break;
