@@ -13,6 +13,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
+// Configuration constants
+const PING_INTERVAL_SECS: u64 = 10;
+const TIME_MARKER_INTERVAL_SECS: u64 = 60;
+
 #[derive(Parser)]
 #[command(name = "oxping")]
 #[command(about = "Ping multiple hosts from a file")]
@@ -34,6 +38,12 @@ enum HostStatus {
     Down,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HistoryEntry {
+    Status(HostStatus),
+    TimeMarker, // Vertical bar separator every minute
+}
+
 #[derive(Debug, Clone)]
 struct HostResult {
     host: Host,
@@ -41,7 +51,7 @@ struct HostResult {
 }
 
 // History of ping results for each host
-type HostHistory = HashMap<String, VecDeque<HostStatus>>;
+type HostHistory = HashMap<String, VecDeque<HistoryEntry>>;
 
 fn parse_hosts_file(path: &PathBuf) -> Result<Vec<Host>, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
@@ -192,14 +202,20 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
             .map(|h| h.iter().copied().collect::<Vec<_>>())
             .unwrap_or_default();
 
-        // Build timeline with colored status characters
+        // Build timeline with colored status characters and time markers
         let mut timeline = String::new();
-        for status in host_history.iter().take(timeline_width) {
-            let (color, chr) = match status {
-                HostStatus::Up => ("\x1b[32m", "●"),   // green
-                HostStatus::Down => ("\x1b[31m", "○"), // red
-            };
-            timeline.push_str(&format!("{}{}\x1b[0m", color, chr));
+        for entry in host_history.iter().take(timeline_width) {
+            match entry {
+                HistoryEntry::Status(HostStatus::Up) => {
+                    timeline.push_str("\x1b[32m●\x1b[0m"); // green
+                }
+                HistoryEntry::Status(HostStatus::Down) => {
+                    timeline.push_str("\x1b[31m○\x1b[0m"); // red
+                }
+                HistoryEntry::TimeMarker => {
+                    timeline.push_str("\x1b[90m|\x1b[0m"); // gray
+                }
+            }
         }
 
         // Pad timeline if needed
@@ -251,8 +267,24 @@ async fn main() {
     // Initialize history for all hosts
     let mut history: HostHistory = HashMap::new();
 
+    // Calculate how many iterations before adding a time marker
+    let iterations_per_marker = TIME_MARKER_INTERVAL_SECS / PING_INTERVAL_SECS;
+    let mut iteration_count = 0;
+
     loop {
         let start = tokio::time::Instant::now();
+
+        // Add time marker at the calculated interval
+        if iteration_count > 0 && iteration_count % iterations_per_marker == 0 {
+            for host in &hosts {
+                let entry = history.entry(host.ip.clone()).or_default();
+                entry.push_front(HistoryEntry::TimeMarker);
+                if entry.len() > 200 {
+                    entry.pop_back();
+                }
+            }
+        }
+        iteration_count += 1;
 
         // Ping all hosts in parallel
         let mut tasks = Vec::new();
@@ -295,7 +327,7 @@ async fn main() {
         // Update history with new results (add to front, newest on left)
         for result in &results {
             let entry = history.entry(result.host.ip.clone()).or_default();
-            entry.push_front(result.status);
+            entry.push_front(HistoryEntry::Status(result.status));
             // Keep only what fits on screen (no need to store more)
             if entry.len() > 200 {
                 entry.pop_back();
@@ -313,8 +345,9 @@ async fn main() {
 
         // Wait for next interval or check for Ctrl-C
         let elapsed = start.elapsed();
-        let sleep_duration = if elapsed < Duration::from_secs(10) {
-            Duration::from_secs(10) - elapsed
+        let target_duration = Duration::from_secs(PING_INTERVAL_SECS);
+        let sleep_duration = if elapsed < target_duration {
+            target_duration - elapsed
         } else {
             Duration::from_millis(100)
         };
@@ -509,12 +542,15 @@ mod tests {
 
         // Add some history
         let entry = history.entry(ip.clone()).or_default();
-        entry.push_front(HostStatus::Up);
-        entry.push_front(HostStatus::Down);
-        entry.push_front(HostStatus::Up);
+        entry.push_front(HistoryEntry::Status(HostStatus::Up));
+        entry.push_front(HistoryEntry::Status(HostStatus::Down));
+        entry.push_front(HistoryEntry::Status(HostStatus::Up));
 
         assert_eq!(history.get(&ip).unwrap().len(), 3);
-        assert_eq!(*history.get(&ip).unwrap().front().unwrap(), HostStatus::Up);
+        assert_eq!(
+            *history.get(&ip).unwrap().front().unwrap(),
+            HistoryEntry::Status(HostStatus::Up)
+        );
     }
 
     #[test]
@@ -526,11 +562,11 @@ mod tests {
 
         // Add more than 200 items
         for i in 0..250 {
-            entry.push_front(if i % 2 == 0 {
+            entry.push_front(HistoryEntry::Status(if i % 2 == 0 {
                 HostStatus::Up
             } else {
                 HostStatus::Down
-            });
+            }));
 
             // Keep only 200 (simulating the main loop logic)
             if entry.len() > 200 {
@@ -539,6 +575,24 @@ mod tests {
         }
 
         assert_eq!(history.get(&ip).unwrap().len(), 200);
+    }
+
+    #[test]
+    fn test_time_marker_in_history() {
+        let mut history: HostHistory = HashMap::new();
+        let ip = "192.168.1.1".to_string();
+
+        let entry = history.entry(ip.clone()).or_default();
+        entry.push_front(HistoryEntry::Status(HostStatus::Up));
+        entry.push_front(HistoryEntry::TimeMarker);
+        entry.push_front(HistoryEntry::Status(HostStatus::Down));
+
+        assert_eq!(history.get(&ip).unwrap().len(), 3);
+        assert_eq!(
+            *history.get(&ip).unwrap().front().unwrap(),
+            HistoryEntry::Status(HostStatus::Down)
+        );
+        assert_eq!(history.get(&ip).unwrap()[1], HistoryEntry::TimeMarker);
     }
 
     #[test]
