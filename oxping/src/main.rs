@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // Configuration constants
@@ -131,7 +132,26 @@ fn setup_panic_hook() {
     }));
 }
 
-fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> io::Result<()> {
+// Helper function to get visible entries from history with scroll offset
+fn get_visible_entries(
+    history: &[HistoryEntry],
+    scroll_offset: usize,
+    width: usize,
+) -> Vec<HistoryEntry> {
+    history
+        .iter()
+        .skip(scroll_offset)
+        .take(width)
+        .copied()
+        .collect()
+}
+
+fn draw_ui(
+    results: &[HostResult],
+    history: &HostHistory,
+    last_update: &str,
+    scroll_offset: usize,
+) -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // Get terminal size
@@ -164,8 +184,12 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
         cursor::MoveTo(0, 0)
     )?;
 
-    // Draw header with timestamp on the right
-    let timestamp = format!("Updated: {}", last_update);
+    // Draw header with timestamp or mode indicator on the right
+    let mode_indicator = if scroll_offset == 0 {
+        format!("Updated: {}", last_update)
+    } else {
+        format!("PAUSED - Offset: {}", scroll_offset)
+    };
     let header_left = format!(
         "{:<host_width$} {:<ip_width$} Timeline",
         "Host",
@@ -175,13 +199,13 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
     );
     let spacing = width
         .saturating_sub(header_left.len())
-        .saturating_sub(timestamp.len());
+        .saturating_sub(mode_indicator.len());
     write!(
         stdout,
         "{}{}{}\r\n",
         header_left,
         " ".repeat(spacing),
-        timestamp
+        mode_indicator
     )?;
 
     // Draw separator
@@ -204,8 +228,11 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
             .unwrap_or_default();
 
         // Build timeline with colored status characters and time markers
+        // Skip scroll_offset entries, then take timeline_width entries
         let mut timeline = String::new();
-        for entry in host_history.iter().take(timeline_width) {
+        let visible_entries = get_visible_entries(&host_history, scroll_offset, timeline_width);
+
+        for entry in &visible_entries {
             match entry {
                 HistoryEntry::Status(HostStatus::Up) => {
                     timeline.push_str("\x1b[32m●\x1b[0m"); // green
@@ -220,7 +247,7 @@ fn draw_ui(results: &[HostResult], history: &HostHistory, last_update: &str) -> 
         }
 
         // Pad timeline if needed
-        let blocks_shown = host_history.len().min(timeline_width);
+        let blocks_shown = visible_entries.len();
         if blocks_shown < timeline_width {
             timeline.push_str(&" ".repeat(timeline_width - blocks_shown));
         }
@@ -265,115 +292,229 @@ async fn main() {
         }
     };
 
-    // Initialize history for all hosts
-    let mut history: HostHistory = HashMap::new();
+    // Shared state between ping task and UI task
+    let history: Arc<Mutex<HostHistory>> = Arc::new(Mutex::new(HashMap::new()));
+    let results: Arc<Mutex<Vec<HostResult>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Calculate how many iterations before adding a time marker
-    let iterations_per_marker = TIME_MARKER_INTERVAL_SECS / PING_INTERVAL_SECS;
-    let mut iteration_count = 0;
+    // Clone for ping task
+    let history_clone = Arc::clone(&history);
+    let results_clone = Arc::clone(&results);
+    let hosts_clone = hosts.clone();
+
+    // Spawn background ping task
+    tokio::spawn(async move {
+        let iterations_per_marker = TIME_MARKER_INTERVAL_SECS / PING_INTERVAL_SECS;
+        let mut iteration_count = 0;
+
+        loop {
+            let start = tokio::time::Instant::now();
+
+            // Add time marker at the calculated interval
+            if iteration_count > 0 && iteration_count % iterations_per_marker == 0 {
+                let mut hist = history_clone.lock().unwrap();
+                for host in &hosts_clone {
+                    let entry = hist.entry(host.ip.clone()).or_default();
+                    entry.push_front(HistoryEntry::TimeMarker);
+                    if entry.len() > MAX_HISTORY_SIZE {
+                        entry.pop_back();
+                    }
+                }
+            }
+            iteration_count += 1;
+
+            // Ping all hosts in parallel
+            let mut tasks = Vec::new();
+            for host in &hosts_clone {
+                let host_clone = host.clone();
+                tasks.push(tokio::spawn(async move {
+                    match new_ping_host(host_clone.ip.clone()) {
+                        Ok(is_up) => {
+                            let status = if is_up {
+                                HostStatus::Up
+                            } else {
+                                HostStatus::Down
+                            };
+                            Ok(HostResult {
+                                host: host_clone,
+                                status,
+                            })
+                        }
+                        Err(e) => Err((host_clone, e.to_string())),
+                    }
+                }));
+            }
+
+            // Wait for all pings to complete
+            let mut ping_results = Vec::new();
+            for task in tasks {
+                match task.await {
+                    Ok(Ok(result)) => ping_results.push(result),
+                    Ok(Err((host, _err))) => {
+                        ping_results.push(HostResult {
+                            host,
+                            status: HostStatus::Down,
+                        });
+                    }
+                    Err(_) => {}
+                }
+            }
+
+            // Update shared results and history
+            {
+                let mut res = results_clone.lock().unwrap();
+                *res = ping_results.clone();
+            }
+
+            {
+                let mut hist = history_clone.lock().unwrap();
+                for result in &ping_results {
+                    let entry = hist.entry(result.host.ip.clone()).or_default();
+                    entry.push_front(HistoryEntry::Status(result.status));
+                    if entry.len() > MAX_HISTORY_SIZE {
+                        entry.pop_back();
+                    }
+                }
+            }
+
+            // Wait for next interval
+            let elapsed = start.elapsed();
+            let target_duration = Duration::from_secs(PING_INTERVAL_SECS);
+            if elapsed < target_duration {
+                tokio::time::sleep(target_duration - elapsed).await;
+            }
+        }
+    });
+
+    // UI task (main thread)
+    let mut scroll_offset: usize = 0;
 
     loop {
-        let start = tokio::time::Instant::now();
+        // Get current state from shared data
+        let current_results = {
+            let res = results.lock().unwrap();
+            res.clone()
+        };
 
-        // Add time marker at the calculated interval
-        if iteration_count > 0 && iteration_count % iterations_per_marker == 0 {
-            for host in &hosts {
-                let entry = history.entry(host.ip.clone()).or_default();
-                entry.push_front(HistoryEntry::TimeMarker);
-                if entry.len() > MAX_HISTORY_SIZE {
-                    entry.pop_back();
-                }
-            }
-        }
-        iteration_count += 1;
-
-        // Ping all hosts in parallel
-        let mut tasks = Vec::new();
-        for host in &hosts {
-            let host_clone = host.clone();
-            tasks.push(tokio::spawn(async move {
-                match new_ping_host(host_clone.ip.clone()) {
-                    Ok(is_up) => {
-                        let status = if is_up {
-                            HostStatus::Up
-                        } else {
-                            HostStatus::Down
-                        };
-                        Ok(HostResult {
-                            host: host_clone,
-                            status,
-                        })
-                    }
-                    Err(e) => Err((host_clone, e.to_string())),
-                }
-            }));
-        }
-
-        // Wait for all pings to complete
-        let mut results = Vec::new();
-        for task in tasks {
-            match task.await {
-                Ok(Ok(result)) => results.push(result),
-                Ok(Err((host, _err))) => {
-                    // Still show the host as down
-                    results.push(HostResult {
-                        host,
-                        status: HostStatus::Down,
-                    });
-                }
-                Err(_) => {}
-            }
-        }
-
-        // Update history with new results (add to front, newest on left)
-        for result in &results {
-            let entry = history.entry(result.host.ip.clone()).or_default();
-            entry.push_front(HistoryEntry::Status(result.status));
-            // Keep only MAX_HISTORY_SIZE entries
-            if entry.len() > MAX_HISTORY_SIZE {
-                entry.pop_back();
-            }
-        }
+        let current_history = {
+            let hist = history.lock().unwrap();
+            hist.clone()
+        };
 
         // Format current time for display
         let last_update = Local::now().format("%H:%M:%S").to_string();
 
         // Draw the UI
-        if let Err(e) = draw_ui(&results, &history, &last_update) {
+        if let Err(e) = draw_ui(
+            &current_results,
+            &current_history,
+            &last_update,
+            scroll_offset,
+        ) {
             eprintln!("Error drawing UI: {}", e);
             break;
         }
 
-        // Wait for next interval or check for Ctrl-C
-        let elapsed = start.elapsed();
-        let target_duration = Duration::from_secs(PING_INTERVAL_SECS);
-        let sleep_duration = if elapsed < target_duration {
-            target_duration - elapsed
-        } else {
-            Duration::from_millis(100)
-        };
-
-        // Check for keyboard events during the sleep period
-        let start_sleep = tokio::time::Instant::now();
+        // Different behavior based on mode
         let mut should_exit = false;
 
-        while start_sleep.elapsed() < sleep_duration {
-            // Poll for keyboard event with short timeout
-            let poll_result = tokio::task::spawn_blocking(|| {
-                if event::poll(Duration::from_millis(100)).unwrap_or(false)
-                    && let Ok(Event::Key(key_event)) = event::read()
-                    && key_event.code == KeyCode::Char('c')
-                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                {
-                    return true;
+        if scroll_offset == 0 {
+            // Live mode: wait for timer interval and check for keys
+            let sleep_duration = Duration::from_secs(PING_INTERVAL_SECS);
+
+            let start_sleep = tokio::time::Instant::now();
+            while start_sleep.elapsed() < sleep_duration {
+                // Poll for keyboard event with short timeout
+                let poll_result = tokio::task::spawn_blocking(|| {
+                    if event::poll(Duration::from_millis(100)).unwrap_or(false)
+                        && let Ok(Event::Key(key_event)) = event::read()
+                    {
+                        match key_event.code {
+                            KeyCode::Char('c')
+                                if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
+                                return Some(KeyCode::Char('c'));
+                            }
+                            KeyCode::Left => return Some(KeyCode::Left),
+                            KeyCode::Right => return Some(KeyCode::Right),
+                            KeyCode::Enter => return Some(KeyCode::Enter),
+                            _ => {}
+                        }
+                    }
+                    None
+                })
+                .await;
+
+                if let Ok(Some(key)) = poll_result {
+                    match key {
+                        KeyCode::Char('c') => {
+                            should_exit = true;
+                            break;
+                        }
+                        KeyCode::Right => {
+                            // Scroll backward (into history)
+                            let max_history_len =
+                                current_history.values().map(|h| h.len()).max().unwrap_or(0);
+                            let terminal_width =
+                                terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+                            let max_offset = max_history_len.saturating_sub(terminal_width / 2);
+                            if scroll_offset < max_offset {
+                                scroll_offset = scroll_offset.saturating_add(1);
+                                break; // Exit sleep loop to refresh display immediately
+                            }
+                        }
+                        _ => {}
+                    }
                 }
-                false
+            }
+        } else {
+            // History mode: block waiting for keypress only
+            let poll_result = tokio::task::spawn_blocking(|| {
+                // Block indefinitely waiting for a key
+                if let Ok(Event::Key(key_event)) = event::read() {
+                    match key_event.code {
+                        KeyCode::Char('c')
+                            if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            return Some(KeyCode::Char('c'));
+                        }
+                        KeyCode::Left => return Some(KeyCode::Left),
+                        KeyCode::Right => return Some(KeyCode::Right),
+                        KeyCode::Enter => return Some(KeyCode::Enter),
+                        _ => {}
+                    }
+                }
+                None
             })
             .await;
 
-            if poll_result.unwrap_or(false) {
-                should_exit = true;
-                break;
+            if let Ok(Some(key)) = poll_result {
+                match key {
+                    KeyCode::Char('c') => {
+                        should_exit = true;
+                    }
+                    KeyCode::Left => {
+                        // Scroll forward (toward present)
+                        if scroll_offset > 0 {
+                            scroll_offset = scroll_offset.saturating_sub(1);
+                        }
+                    }
+                    KeyCode::Right => {
+                        // Scroll backward (into history)
+                        let max_history_len =
+                            current_history.values().map(|h| h.len()).max().unwrap_or(0);
+                        let terminal_width =
+                            terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+                        let max_offset = max_history_len.saturating_sub(terminal_width / 2);
+                        if scroll_offset < max_offset {
+                            scroll_offset = scroll_offset.saturating_add(1);
+                        }
+                    }
+                    KeyCode::Enter => {
+                        // Return to live mode
+                        scroll_offset = 0;
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -619,5 +760,97 @@ mod tests {
         assert_eq!(hosts[1].name, "web-server");
         assert_eq!(hosts[2].name, "db-server");
         assert_eq!(hosts[3].name, "dns1");
+    }
+
+    #[test]
+    fn test_scrolling_timeline_display() {
+        // Create a history with known data pattern
+        let mut history: VecDeque<HistoryEntry> = VecDeque::new();
+
+        // Push oldest to newest (last push_front = position 0)
+        history.push_front(HistoryEntry::Status(HostStatus::Down)); // oldest (position 9)
+        history.push_front(HistoryEntry::Status(HostStatus::Down)); // position 8
+        history.push_front(HistoryEntry::Status(HostStatus::Down)); // position 7
+        history.push_front(HistoryEntry::TimeMarker); // position 6
+        history.push_front(HistoryEntry::Status(HostStatus::Up)); // position 5
+        history.push_front(HistoryEntry::Status(HostStatus::Up)); // position 4
+        history.push_front(HistoryEntry::Status(HostStatus::Up)); // position 3
+        history.push_front(HistoryEntry::TimeMarker); // position 2
+        history.push_front(HistoryEntry::Status(HostStatus::Down)); // position 1
+        history.push_front(HistoryEntry::Status(HostStatus::Down)); // position 0 (newest)
+
+        // Convert to Vec as the function expects
+        let history_vec: Vec<HistoryEntry> = history.iter().copied().collect();
+
+        // Verify what we actually have
+        assert_eq!(history_vec.len(), 10);
+        // Position 0 should be newest (last push_front)
+        assert_eq!(history_vec[0], HistoryEntry::Status(HostStatus::Down));
+        assert_eq!(history_vec[1], HistoryEntry::Status(HostStatus::Down));
+        assert_eq!(history_vec[2], HistoryEntry::TimeMarker);
+
+        // Test with scroll_offset = 0 (live mode, show newest 5 entries)
+        let visible = get_visible_entries(&history_vec, 0, 5);
+        assert_eq!(visible.len(), 5);
+        assert_eq!(visible[0], HistoryEntry::Status(HostStatus::Down)); // newest
+        assert_eq!(visible[1], HistoryEntry::Status(HostStatus::Down));
+        assert_eq!(visible[2], HistoryEntry::TimeMarker);
+        assert_eq!(visible[3], HistoryEntry::Status(HostStatus::Up));
+        assert_eq!(visible[4], HistoryEntry::Status(HostStatus::Up));
+
+        // Test with scroll_offset = 3 (scrolled back 3 positions)
+        let visible = get_visible_entries(&history_vec, 3, 5);
+        assert_eq!(visible.len(), 5);
+        assert_eq!(visible[0], HistoryEntry::Status(HostStatus::Up)); // now showing older data
+        assert_eq!(visible[1], HistoryEntry::Status(HostStatus::Up));
+        assert_eq!(visible[2], HistoryEntry::Status(HostStatus::Up));
+        assert_eq!(visible[3], HistoryEntry::TimeMarker);
+        assert_eq!(visible[4], HistoryEntry::Status(HostStatus::Down));
+
+        // Test with scroll_offset = 7 (scrolled back to oldest data)
+        let visible = get_visible_entries(&history_vec, 7, 5);
+        assert_eq!(visible.len(), 3); // Only 3 entries left
+        assert_eq!(visible[0], HistoryEntry::Status(HostStatus::Down));
+        assert_eq!(visible[1], HistoryEntry::Status(HostStatus::Down));
+        assert_eq!(visible[2], HistoryEntry::Status(HostStatus::Down));
+
+        // Test with scroll_offset beyond available data
+        let visible = get_visible_entries(&history_vec, 20, 5);
+        assert_eq!(visible.len(), 0); // No data available
+    }
+
+    #[test]
+    fn test_scrolling_with_time_markers() {
+        // Create history with alternating statuses and time markers
+        let mut history: VecDeque<HistoryEntry> = VecDeque::new();
+
+        for i in 0..10 {
+            if i % 3 == 0 {
+                history.push_front(HistoryEntry::TimeMarker);
+            } else if i % 2 == 0 {
+                history.push_front(HistoryEntry::Status(HostStatus::Up));
+            } else {
+                history.push_front(HistoryEntry::Status(HostStatus::Down));
+            }
+        }
+
+        let history_vec: Vec<HistoryEntry> = history.iter().copied().collect();
+
+        // Verify we can scroll and see time markers at different positions
+        let visible_0 = get_visible_entries(&history_vec, 0, 3);
+        let visible_3 = get_visible_entries(&history_vec, 3, 3);
+        let visible_6 = get_visible_entries(&history_vec, 6, 3);
+
+        // All should have different data
+        assert_ne!(visible_0, visible_3);
+        assert_ne!(visible_3, visible_6);
+
+        // Verify time markers appear in expected positions
+        let all_visible = get_visible_entries(&history_vec, 0, 10);
+        let marker_count = all_visible
+            .iter()
+            .filter(|e| **e == HistoryEntry::TimeMarker)
+            .count();
+        assert_eq!(marker_count, 4); // 0, 3, 6, 9 = 4 markers
     }
 }
