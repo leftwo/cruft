@@ -305,8 +305,7 @@ async fn main() {
 
         // Update history with new results (add to front, newest on left)
         for result in &results {
-            let entry =
-                history.entry(result.host.ip.clone()).or_default();
+            let entry = history.entry(result.host.ip.clone()).or_default();
             entry.push_front(result.status);
             // Keep only what fits on screen (no need to store more)
             if entry.len() > 200 {
@@ -328,27 +327,32 @@ async fn main() {
             Duration::from_millis(100)
         };
 
-        // Use select to wait for either timeout or Ctrl-C
-        tokio::select! {
-            _ = tokio::time::sleep(sleep_duration) => {
-                // Timeout reached, continue to next iteration
+        // Check for keyboard events during the sleep period
+        let start_sleep = tokio::time::Instant::now();
+        let mut should_exit = false;
+
+        while start_sleep.elapsed() < sleep_duration {
+            // Poll for keyboard event with short timeout
+            let poll_result = tokio::task::spawn_blocking(|| {
+                if event::poll(Duration::from_millis(100)).unwrap_or(false)
+                    && let Ok(Event::Key(key_event)) = event::read()
+                        && key_event.code == KeyCode::Char('c')
+                            && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            return true;
+                        }
+                false
+            })
+            .await;
+
+            if poll_result.unwrap_or(false) {
+                should_exit = true;
+                break;
             }
-            ctrl_c = tokio::task::spawn_blocking(move || {
-                // Poll for keyboard events with short timeout
-                loop {
-                    if event::poll(Duration::from_millis(100)).unwrap_or(false)
-                        && let Ok(Event::Key(key_event)) = event::read()
-                            && key_event.code == KeyCode::Char('c')
-                                && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                            {
-                                return true;
-                            }
-                }
-            }) => {
-                if ctrl_c.unwrap_or(false) {
-                    break;
-                }
-            }
+        }
+
+        if should_exit {
+            break;
         }
     }
 }
