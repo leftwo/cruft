@@ -5,6 +5,7 @@ use crossterm::{
     execute,
     terminal::{self, ClearType},
 };
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -37,6 +38,9 @@ struct HostResult {
     host: Host,
     status: HostStatus,
 }
+
+// History of ping results for each host
+type HostHistory = HashMap<String, VecDeque<HostStatus>>;
 
 fn parse_hosts_file(path: &PathBuf) -> Result<Vec<Host>, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
@@ -115,7 +119,7 @@ fn setup_panic_hook() {
     }));
 }
 
-fn draw_ui(results: &[HostResult]) -> io::Result<()> {
+fn draw_ui(results: &[HostResult], history: &HostHistory) -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // Get terminal size
@@ -126,12 +130,21 @@ fn draw_ui(results: &[HostResult]) -> io::Result<()> {
     let width = width.max(40);
 
     // Calculate column widths
-    // Format: "║ Host IP Status ║"
-    // Borders take 4 chars: "║ " and " ║"
-    // Status takes 8 chars: " Status " (including space and symbol)
-    let available = width.saturating_sub(4 + 8);
-    let host_width = (available / 2).max(8);
-    let ip_width = available.saturating_sub(host_width).max(7);
+    // Find longest hostname (max 16 chars)
+    let max_host_len = results
+        .iter()
+        .map(|r| r.host.name.len().min(16))
+        .max()
+        .unwrap_or(4);
+    let host_width = max_host_len.max(4); // At least "Host"
+
+    // IP is fixed at 15 chars (for IPv4 xxx.xxx.xxx.xxx)
+    let ip_width = 15;
+
+    // Timeline gets the rest
+    // Format: "║ Host IP Timeline ║"
+    // Borders: 2, spaces: 4 (1 after ║, 1 between cols, 1 between cols, 1 before ║)
+    let timeline_width = width.saturating_sub(2 + host_width + ip_width + 4);
 
     execute!(
         stdout,
@@ -159,49 +172,56 @@ fn draw_ui(results: &[HostResult]) -> io::Result<()> {
     write!(stdout, "{}\r\n", separator)?;
 
     // Draw header
-    let header = format!(
-        "║ {:<host_width$} {:<ip_width$} Status ║",
+    write!(
+        stdout,
+        "║ {:<host_width$} {:<ip_width$} Timeline{}║\r\n",
         "Host",
         "IP",
+        " ".repeat(timeline_width.saturating_sub(8)),
         host_width = host_width,
         ip_width = ip_width
-    );
-    write!(stdout, "{}\r\n", header)?;
+    )?;
 
     // Draw separator
     write!(stdout, "{}\r\n", separator)?;
 
-    // Draw each host
+    // Draw each host with timeline
     for result in results {
-        let status_char = match result.status {
-            HostStatus::Up => "●",
-            HostStatus::Down => "○",
-        };
-        let status_color = match result.status {
-            HostStatus::Up => "\x1b[32m",   // green
-            HostStatus::Down => "\x1b[31m", // red
+        // Truncate hostname to 16 chars max
+        let name = if result.host.name.len() > 16 {
+            &result.host.name[..16]
+        } else {
+            &result.host.name
         };
 
-        // Truncate name and IP if needed
-        let name = if result.host.name.len() > host_width {
-            format!("{}…", &result.host.name[..host_width - 1])
-        } else {
-            result.host.name.clone()
-        };
+        // Get history for this host
+        let host_history = history
+            .get(&result.host.ip)
+            .map(|h| h.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
 
-        let ip = if result.host.ip.len() > ip_width {
-            format!("{}…", &result.host.ip[..ip_width - 1])
-        } else {
-            result.host.ip.clone()
-        };
+        // Build timeline with colored status characters
+        let mut timeline = String::new();
+        for status in host_history.iter().take(timeline_width) {
+            let (color, chr) = match status {
+                HostStatus::Up => ("\x1b[32m", "●"),   // green
+                HostStatus::Down => ("\x1b[31m", "○"), // red
+            };
+            timeline.push_str(&format!("{}{}\x1b[0m", color, chr));
+        }
+
+        // Pad timeline if needed
+        let blocks_shown = host_history.len().min(timeline_width);
+        if blocks_shown < timeline_width {
+            timeline.push_str(&" ".repeat(timeline_width - blocks_shown));
+        }
 
         write!(
             stdout,
-            "║ {:<host_width$} {:<ip_width$} {}{}\x1b[0m      ║\r\n",
+            "║ {:<host_width$} {:<ip_width$} {}║\r\n",
             name,
-            ip,
-            status_color,
-            status_char,
+            result.host.ip,
+            timeline,
             host_width = host_width,
             ip_width = ip_width
         )?;
@@ -238,6 +258,9 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // Initialize history for all hosts
+    let mut history: HostHistory = HashMap::new();
 
     loop {
         let start = tokio::time::Instant::now();
@@ -280,8 +303,19 @@ async fn main() {
             }
         }
 
+        // Update history with new results (add to front, newest on left)
+        for result in &results {
+            let entry =
+                history.entry(result.host.ip.clone()).or_default();
+            entry.push_front(result.status);
+            // Keep only what fits on screen (no need to store more)
+            if entry.len() > 200 {
+                entry.pop_back();
+            }
+        }
+
         // Draw the UI
-        if let Err(e) = draw_ui(&results) {
+        if let Err(e) = draw_ui(&results, &history) {
             eprintln!("Error drawing UI: {}", e);
             break;
         }
