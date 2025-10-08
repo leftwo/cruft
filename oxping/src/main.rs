@@ -454,17 +454,23 @@ async fn main() {
                 // Poll for keyboard event with short timeout
                 let poll_result = tokio::task::spawn_blocking(|| {
                     if event::poll(Duration::from_millis(100)).unwrap_or(false)
-                        && let Ok(Event::Key(key_event)) = event::read()
+                        && let Ok(evt) = event::read()
                     {
-                        match key_event.code {
-                            KeyCode::Char('c')
-                                if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
-                            {
-                                return Some(KeyCode::Char('c'));
+                        match evt {
+                            Event::Key(key_event) => match key_event.code {
+                                KeyCode::Char('c')
+                                    if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    return Some(KeyCode::Char('c'));
+                                }
+                                KeyCode::Left => return Some(KeyCode::Left),
+                                KeyCode::Right => return Some(KeyCode::Right),
+                                KeyCode::Enter => return Some(KeyCode::Enter),
+                                _ => {}
+                            },
+                            Event::Resize(_, _) => {
+                                return Some(KeyCode::F(1)); // Use F1 as resize signal
                             }
-                            KeyCode::Left => return Some(KeyCode::Left),
-                            KeyCode::Right => return Some(KeyCode::Right),
-                            KeyCode::Enter => return Some(KeyCode::Enter),
                             _ => {}
                         }
                     }
@@ -490,6 +496,16 @@ async fn main() {
                                 break; // Exit sleep loop to refresh display immediately
                             }
                         }
+                        KeyCode::F(1) => {
+                            // Window resize detected - clear screen and redraw
+                            let _ = execute!(
+                                io::stdout(),
+                                terminal::Clear(terminal::ClearType::All),
+                                cursor::MoveTo(0, 0)
+                            );
+                            previous_line_count = 0;
+                            break; // Exit sleep loop to refresh display immediately
+                        }
                         _ => {}
                     }
                 }
@@ -503,16 +519,22 @@ async fn main() {
             // History mode: block waiting for keypress only
             let poll_result = tokio::task::spawn_blocking(|| {
                 // Block indefinitely waiting for a key
-                if let Ok(Event::Key(key_event)) = event::read() {
-                    match key_event.code {
-                        KeyCode::Char('c')
-                            if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
-                            return Some(KeyCode::Char('c'));
+                if let Ok(evt) = event::read() {
+                    match evt {
+                        Event::Key(key_event) => match key_event.code {
+                            KeyCode::Char('c')
+                                if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
+                                return Some(KeyCode::Char('c'));
+                            }
+                            KeyCode::Left => return Some(KeyCode::Left),
+                            KeyCode::Right => return Some(KeyCode::Right),
+                            KeyCode::Enter => return Some(KeyCode::Enter),
+                            _ => {}
+                        },
+                        Event::Resize(_, _) => {
+                            return Some(KeyCode::F(1)); // Use F1 as resize signal
                         }
-                        KeyCode::Left => return Some(KeyCode::Left),
-                        KeyCode::Right => return Some(KeyCode::Right),
-                        KeyCode::Enter => return Some(KeyCode::Enter),
                         _ => {}
                     }
                 }
@@ -545,6 +567,15 @@ async fn main() {
                     KeyCode::Enter => {
                         // Return to live mode
                         scroll_offset = 0;
+                    }
+                    KeyCode::F(1) => {
+                        // Window resize detected - clear screen and redraw
+                        let _ = execute!(
+                            io::stdout(),
+                            terminal::Clear(terminal::ClearType::All),
+                            cursor::MoveTo(0, 0)
+                        );
+                        previous_line_count = 0;
                     }
                     _ => {}
                 }
