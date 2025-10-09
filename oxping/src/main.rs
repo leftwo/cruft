@@ -187,7 +187,7 @@ fn draw_ui(
         format!("PAUSED - Offset: {}", scroll_offset)
     };
     let header_left = format!(
-        "{:<host_width$} {:<ip_width$}  Timeline",
+        "{:<host_width$} {:<ip_width$}",
         "Host",
         "IP",
         host_width = host_width,
@@ -280,7 +280,7 @@ fn draw_ui(
     current_line_count += 1;
 
     // Footer line padded to full width
-    let footer_line = format!("{:<width$}", "Press Ctrl-C to exit", width = width);
+    let footer_line = format!("{:<width$}", "Ctrl-C to exit, left/right arrows to see history", width = width);
     execute!(stdout, cursor::MoveTo(0, current_line_count as u16))?;
     write!(stdout, "{}", footer_line)?;
     current_line_count += 1;
